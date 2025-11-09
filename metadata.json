@@ -1,0 +1,5 @@
+{
+  "name": "AI-Powered Schedule Planner",
+  "description": "A sleek and modern time scheduling application that allows you to seamlessly switch between year, month, and day views. It includes an optional AI-powered feature to help you generate event ideas.",
+  "requestFramePermissions": []
+}

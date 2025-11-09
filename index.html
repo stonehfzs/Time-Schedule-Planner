@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Time Schedule App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --main-bg-light: #f9fafb;
+            --main-bg-dark: #111827;
+            --header-bg-light: #ffffff;
+            --header-bg-dark: #1f2937;
+            --text-light: #1f2937;
+            --text-dark: #f9fafb;
+            --border-light: #e5e7eb;
+            --border-dark: #374151;
+            --primary-color: #3b82f6;
+            --hover-light: #f3f4f6;
+            --hover-dark: #374151;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .view-container {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .modal {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .modal.is-open {
+            display: flex;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .day-event {
+            transition: all 0.2s ease-in-out;
+        }
+        .day-event:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div id="app" class="flex flex-col h-screen">
+        <!-- Header -->
+        <header id="app-header" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-xl font-bold">Schedule</h1>
+                <button id="today-btn" class="px-4 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    Today
+                </button>
+                <div class="flex items-center space-x-1">
+                    <button id="prev-btn" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                    </button>
+                    <button id="next-btn" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                    </button>
+                </div>
+                <h2 id="header-text" class="text-lg font-semibold w-48 text-center"></h2>
+            </div>
+            <div id="view-switcher" class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 p-1 rounded-lg">
+                <button data-view="day" class="px-3 py-1.5 text-sm font-medium rounded-md">Day</button>
+                <button data-view="month" class="px-3 py-1.5 text-sm font-medium rounded-md">Month</button>
+                <button data-view="year" class="px-3 py-1.5 text-sm font-medium rounded-md">Year</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main id="view-container" class="flex-1 overflow-auto p-4 md:p-6"></main>
+
+        <!-- Event Modal -->
+        <div id="event-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-full max-w-lg mx-4">
+                <form id="event-form">
+                    <h2 class="text-2xl font-bold mb-4" id="modal-title">Add Event</h2>
+                    <input type="hidden" id="event-id">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="event-title" class="block text-sm font-medium">Title</label>
+                            <input type="text" id="event-title" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label for="event-description" class="block text-sm font-medium">Description</label>
+                            <textarea id="event-description" rows="3" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                        </div>
+                        <div class="flex space-x-4">
+                            <div class="flex-1">
+                                <label for="start-time" class="block text-sm font-medium">Start Time</label>
+                                <input type="time" id="start-time" value="09:00" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                            </div>
+                            <div class="flex-1">
+                                <label for="end-time" class="block text-sm font-medium">End Time</label>
+                                <input type="time" id="end-time" value="10:00" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                            </div>
+                        </div>
+                         <div>
+                            <label for="event-recurring" class="block text-sm font-medium">Repeat</label>
+                            <select id="event-recurring" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="none">None</option>
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium">Color</label>
+                            <div id="color-picker" class="mt-2 flex space-x-2"></div>
+                        </div>
+                        <p id="modal-error" class="text-red-500 text-sm mt-2 hidden"></p>
+                    </div>
+                    
+                    <div class="mt-6 flex justify-between">
+                        <div>
+                            <button type="button" id="delete-event-btn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors hidden">Delete</button>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button type="button" id="cancel-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">Cancel</button>
+                            <button type="submit" id="save-event-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">Save</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+    <script type="module" src="/index.js"></script>
+</body>
+</html>
