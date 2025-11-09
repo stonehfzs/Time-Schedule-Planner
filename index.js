@@ -1,14 +1,19 @@
+
 document.addEventListener('DOMContentLoaded', () => {
     const appState = {
         currentDate: new Date(),
         viewMode: 'month', // 'day', 'month', 'year'
         events: JSON.parse(localStorage.getItem('schedule_events')) || [],
+        tasks: JSON.parse(localStorage.getItem('schedule_tasks')) || [],
         selectedDate: new Date(),
         editingEventId: null,
+        isTaskSidebarVisible: true,
     };
 
     const colors = ['#0284c7', '#16a34a', '#ca8a04', '#c026d3', '#db2777', '#dc2626'];
     let selectedColor = colors[0];
+    let modalGuests = [];
+    let modalAttachments = [];
 
     // --- DOM Elements ---
     const headerText = document.getElementById('header-text');
@@ -17,6 +22,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const todayBtn = document.getElementById('today-btn');
+    const toggleTasksBtn = document.getElementById('toggle-tasks-btn');
+
+    // Task Sidebar Elements
+    const taskSidebar = document.getElementById('task-sidebar');
+    const taskForm = document.getElementById('task-form');
+    const taskInput = document.getElementById('task-input');
+    const taskDueDateInput = document.getElementById('task-due-date-input');
+    const taskList = document.getElementById('task-list');
     
     // Modal Elements
     const eventModal = document.getElementById('event-modal');
@@ -25,6 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const eventIdInput = document.getElementById('event-id');
     const eventTitleInput = document.getElementById('event-title');
     const eventDescriptionInput = document.getElementById('event-description');
+    const eventLocationInput = document.getElementById('event-location');
+    const eventOrganizationInput = document.getElementById('event-organization');
     const startTimeInput = document.getElementById('start-time');
     const endTimeInput = document.getElementById('end-time');
     const eventRecurringInput = document.getElementById('event-recurring');
@@ -33,6 +48,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveEventBtn = document.getElementById('save-event-btn');
     const deleteEventBtn = document.getElementById('delete-event-btn');
     const cancelBtn = document.getElementById('cancel-btn');
+    const eventGuestInput = document.getElementById('event-guest-input');
+    const addGuestBtn = document.getElementById('add-guest-btn');
+    const guestList = document.getElementById('guest-list');
+    const eventAttachmentInput = document.getElementById('event-attachment-input');
+    const addAttachmentBtn = document.getElementById('add-attachment-btn');
+    const attachmentList = document.getElementById('attachment-list');
 
 
     // --- State Management & Rendering ---
@@ -41,10 +62,16 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('schedule_events', JSON.stringify(appState.events));
     };
 
+    const saveTasks = () => {
+        localStorage.setItem('schedule_tasks', JSON.stringify(appState.tasks));
+    };
+
     const render = () => {
         viewContainer.style.opacity = '0';
         setTimeout(() => {
             updateHeader();
+            renderTasks();
+            updateTaskSidebarVisibility();
             switch (appState.viewMode) {
                 case 'year':
                     renderYearView();
@@ -66,10 +93,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 headerText.textContent = appState.currentDate.getFullYear();
                 break;
             case 'month':
-                headerText.textContent = appState.currentDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+                headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
                 break;
             case 'day':
-                headerText.textContent = appState.currentDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
                 break;
         }
 
@@ -89,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderYearView = () => {
         const year = appState.currentDate.getFullYear();
-        const monthNames = Array.from({ length: 12 }, (_, i) => new Date(0, i).toLocaleString('default', { month: 'long' }));
+        const monthNames = Array.from({ length: 12 }, (_, i) => new Date(0, i).toLocaleString('en-US', { month: 'long' }));
         const today = new Date();
 
         let html = `<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 sm:p-6"><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">`;
@@ -120,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const firstDayOfMonth = new Date(year, month, 1).getDay();
-        const weekDayNames = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, i + 1).toLocaleString('default', { weekday: 'short' }));
+        const weekDayNames = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, i + 1).toLocaleString('en-US', { weekday: 'short' }));
 
         let html = `
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden h-full flex flex-col">
@@ -138,12 +165,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentDate = new Date(year, month, day);
             const isTodayClass = currentDate.getTime() === today.getTime() ? 'bg-blue-600 text-white rounded-full h-7 w-7 flex items-center justify-center' : '';
             const dayEvents = getEventsForDate(currentDate);
+            const dayTasks = getTasksForDate(currentDate);
 
             html += `
                 <div class="day-cell relative p-2 border-r border-b border-gray-200 dark:border-gray-700 flex flex-col group hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer" data-date="${currentDate.toISOString()}">
                     <time datetime="${currentDate.toISOString()}" class="text-sm font-medium ${isTodayClass}">${day}</time>
+                    ${dayTasks.length > 0 ? `<div class="absolute top-1 right-1 h-2 w-2 rounded-full bg-green-500" title="${dayTasks.length} task(s)"></div>` : ''}
                     <div class="mt-1 space-y-1 overflow-y-auto max-h-24">
-                        ${dayEvents.slice(0, 2).map(event => `<div class="text-xs px-1.5 py-0.5 rounded text-white" style="background-color: ${event.color};">${event.title}</div>`).join('')}
+                        ${dayEvents.slice(0, 2).map(event => `<div class="month-event text-xs px-1.5 py-0.5 rounded text-white cursor-move" draggable="true" data-event-id="${event.id}" style="background-color: ${event.color};">${event.title}</div>`).join('')}
                         ${dayEvents.length > 2 ? `<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">+ ${dayEvents.length - 2} more</div>` : ''}
                     </div>
                     <button class="add-event-btn absolute bottom-2 right-2 h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">+</button>
@@ -159,21 +188,40 @@ document.addEventListener('DOMContentLoaded', () => {
         const date = appState.currentDate;
         const hours = Array.from({ length: 24 }, (_, i) => i);
         const dayEvents = getEventsForDate(date);
+        const dayTasks = getTasksForDate(date);
 
-        const formatTime = (hour) => new Date(0,0,0,hour).toLocaleTimeString([], { hour: 'numeric', hour12: true });
+        const formatTime = (hour) => new Date(0,0,0,hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+
+        const taskHtml = dayTasks.map(task => `
+            <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                <div class="flex items-center">
+                    <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
+                    <label class="ml-3 ${task.completed ? 'line-through text-gray-500' : ''}">${task.title}</label>
+                </div>
+                <button class="delete-task-btn text-gray-400 hover:text-red-500 font-bold text-lg" data-task-id="${task.id}" aria-label="Delete task">&times;</button>
+            </div>
+        `).join('');
 
         let html = `
             <div class="bg-white dark:bg-gray-900 rounded-lg shadow-lg flex flex-col h-full">
-                <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <h3 class="text-lg font-semibold">${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
-                    <button id="day-add-event" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium">Add Event</button>
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold">${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
+                        <button id="day-add-event" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium">Add Event</button>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-2 text-gray-700 dark:text-gray-300">Tasks for Today</h4>
+                        <div id="day-view-tasks" class="space-y-1">
+                            ${dayTasks.length > 0 ? taskHtml : '<p class="text-sm text-gray-500">No tasks due today.</p>'}
+                        </div>
+                    </div>
                 </div>
                 <div class="flex-1 overflow-auto relative">
                     <div class="grid grid-cols-[auto,1fr] h-full" style="min-height: ${24 * 4}rem;">
                         <div class="pr-2 text-right text-xs text-gray-500 dark:text-gray-400">
                             ${hours.map(hour => `<div class="h-16 flex items-start justify-end -translate-y-2">${hour > 0 ? formatTime(hour) : ''}</div>`).join('')}
                         </div>
-                        <div class="relative border-l border-gray-200 dark:border-gray-700">
+                        <div id="day-view-timeline" class="relative border-l border-gray-200 dark:border-gray-700">
                             ${hours.map(hour => `<div class="h-16 border-b border-gray-200 dark:border-gray-700"></div>`).join('')}
                             ${dayEvents.map(event => {
                                 const start = new Date(event.start);
@@ -182,11 +230,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const duration = (end.getTime() - start.getTime()) / (1000 * 60);
                                 const height = (duration / (24 * 60)) * 100;
                                 return `
-                                    <div class="day-event absolute left-2 right-2 p-2 text-white rounded-lg shadow-md cursor-pointer overflow-hidden" 
+                                    <div class="day-event absolute left-2 right-2 p-2 text-white rounded-lg shadow-md cursor-pointer overflow-hidden cursor-move" 
                                          style="top: ${top}%; height: ${Math.max(height, 2)}%; background-color: ${event.color};"
-                                         data-event-id="${event.id}">
+                                         data-event-id="${event.id}"
+                                         draggable="true">
                                         <p class="font-bold text-sm">${event.title}</p>
-                                        <p class="text-xs">${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                        <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                                        ${event.location ? `<p class="text-xs opacity-80 mt-1 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
                                     </div>
                                 `;
                             }).join('')}
@@ -197,10 +247,31 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         viewContainer.innerHTML = html;
         document.getElementById('day-add-event')?.addEventListener('click', () => openEventModal(date));
+
+        document.getElementById('day-view-tasks').addEventListener('click', e => {
+            const checkbox = e.target.closest('.task-checkbox');
+            if (checkbox) {
+                const taskId = checkbox.dataset.taskId;
+                const task = appState.tasks.find(t => t.id === taskId);
+                if (task) {
+                    task.completed = checkbox.checked;
+                    saveTasks();
+                    render(); // Re-render to update styles
+                }
+            }
+
+            const deleteBtn = e.target.closest('.delete-task-btn');
+            if (deleteBtn) {
+                const taskId = deleteBtn.dataset.taskId;
+                appState.tasks = appState.tasks.filter(t => t.id !== taskId);
+                saveTasks();
+                render();
+            }
+        });
     };
 
 
-    // --- Event Logic ---
+    // --- Event & Task Logic ---
 
     const getEventsForDate = (date) => {
         const dateString = date.toDateString();
@@ -228,14 +299,74 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }).sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     };
-    
 
+    const getTasksForDate = (date) => {
+        const dateString = date.toISOString().split('T')[0];
+        return appState.tasks.filter(task => task.dueDate === dateString);
+    };
+
+    const renderTasks = () => {
+        const sortedTasks = [...appState.tasks].sort((a, b) => {
+            if (a.completed && !b.completed) return 1;
+            if (!a.completed && b.completed) return -1;
+            return new Date(a.createdAt) - new Date(b.createdAt);
+        });
+
+        taskList.innerHTML = sortedTasks.map(task => `
+            <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                <div class="flex items-center overflow-hidden">
+                    <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 flex-shrink-0" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
+                    <div class="ml-3 truncate">
+                        <label class="${task.completed ? 'line-through text-gray-500' : ''}">${task.title}</label>
+                        ${task.dueDate ? `<p class="text-xs text-gray-400 dark:text-gray-500">${new Date(task.dueDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>` : ''}
+                    </div>
+                </div>
+                <button class="delete-task-btn text-gray-400 hover:text-red-500 font-bold text-lg ml-2 flex-shrink-0" data-task-id="${task.id}" aria-label="Delete task">&times;</button>
+            </div>
+        `).join('');
+    };
+    
+    const updateTaskSidebarVisibility = () => {
+        if (appState.isTaskSidebarVisible) {
+            taskSidebar.classList.remove('hidden');
+            toggleTasksBtn.classList.add('bg-blue-100', 'dark:bg-blue-900');
+        } else {
+            taskSidebar.classList.add('hidden');
+            toggleTasksBtn.classList.remove('bg-blue-100', 'dark:bg-blue-900');
+        }
+    };
+    
     // --- Modal Logic ---
+
+    const renderGuests = () => {
+        guestList.innerHTML = modalGuests.map(guest => `
+            <span class="flex items-center bg-gray-200 dark:bg-gray-600 text-sm rounded-full px-3 py-1 font-medium">
+                ${guest}
+                <button type="button" class="ml-2 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 remove-guest-btn" data-guest="${guest}" aria-label="Remove guest">&times;</button>
+            </span>
+        `).join('');
+    };
+
+    const renderAttachments = () => {
+        attachmentList.innerHTML = modalAttachments.map(link => {
+            try {
+                const hostname = new URL(link).hostname;
+                return `
+                <span class="flex items-center bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-sm rounded-full px-3 py-1 font-medium">
+                    <a href="${link}" target="_blank" rel="noopener noreferrer" class="hover:underline">${hostname}</a>
+                    <button type="button" class="ml-2 text-blue-500 hover:text-blue-800 dark:hover:text-blue-200 remove-attachment-btn" data-link="${link}" aria-label="Remove attachment">&times;</button>
+                </span>
+            `
+            } catch { return '' }
+        }).join('');
+    };
 
     const openEventModal = (date, eventId = null) => {
         appState.selectedDate = date;
         appState.editingEventId = eventId;
         eventForm.reset();
+        modalGuests = [];
+        modalAttachments = [];
         modalError.classList.add('hidden');
 
         if (eventId) {
@@ -244,10 +375,14 @@ document.addEventListener('DOMContentLoaded', () => {
             eventIdInput.value = event.id;
             eventTitleInput.value = event.title;
             eventDescriptionInput.value = event.description;
+            eventLocationInput.value = event.location || '';
+            eventOrganizationInput.value = event.organization || '';
             startTimeInput.value = new Date(event.start).toTimeString().substring(0, 5);
             endTimeInput.value = new Date(event.end).toTimeString().substring(0, 5);
             eventRecurringInput.value = event.recurring || 'none';
             selectedColor = event.color;
+            modalGuests = event.guests || [];
+            modalAttachments = event.attachments || [];
             deleteEventBtn.classList.remove('hidden');
         } else {
             modalTitle.textContent = 'Add Event';
@@ -259,12 +394,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         updateColorPicker();
+        renderGuests();
+        renderAttachments();
         eventModal.classList.add('is-open');
     };
 
     const closeEventModal = () => {
         eventModal.classList.remove('is-open');
         appState.editingEventId = null;
+        modalGuests = [];
+        modalAttachments = [];
+        guestList.innerHTML = '';
+        attachmentList.innerHTML = '';
     };
     
     const updateColorPicker = () => {
@@ -308,6 +449,11 @@ document.addEventListener('DOMContentLoaded', () => {
         render();
     });
 
+    toggleTasksBtn.addEventListener('click', () => {
+        appState.isTaskSidebarVisible = !appState.isTaskSidebarVisible;
+        updateTaskSidebarVisibility();
+    });
+
     viewContainer.addEventListener('click', (e) => {
         const monthBtn = e.target.closest('.month-btn');
         if (monthBtn) {
@@ -318,7 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const dayCell = e.target.closest('.day-cell');
-        if (dayCell) {
+        if (dayCell && !e.target.closest('[draggable="true"]')) { // Prevent changing view when clicking a draggable event
             appState.currentDate = new Date(dayCell.dataset.date);
             appState.viewMode = 'day';
             render();
@@ -329,7 +475,7 @@ document.addEventListener('DOMContentLoaded', () => {
             openEventModal(date);
         }
         
-        const dayEvent = e.target.closest('.day-event');
+        const dayEvent = e.target.closest('.day-event, .month-event');
         if (dayEvent) {
              const eventId = dayEvent.dataset.eventId;
              const event = appState.events.find(e => e.id === eventId);
@@ -378,6 +524,10 @@ document.addEventListener('DOMContentLoaded', () => {
             end: endDateTime.toISOString(),
             color: selectedColor,
             recurring: eventRecurringInput.value,
+            location: eventLocationInput.value.trim(),
+            organization: eventOrganizationInput.value.trim(),
+            guests: modalGuests,
+            attachments: modalAttachments,
         };
 
         if (appState.editingEventId) {
@@ -398,6 +548,230 @@ document.addEventListener('DOMContentLoaded', () => {
         closeEventModal();
         render();
     });
+    
+    addGuestBtn.addEventListener('click', () => {
+        const guestEmail = eventGuestInput.value.trim();
+        if (guestEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) {
+            if (!modalGuests.includes(guestEmail)) {
+                modalGuests.push(guestEmail);
+                renderGuests();
+                eventGuestInput.value = '';
+                modalError.classList.add('hidden');
+            } else {
+                modalError.textContent = 'Guest already added.';
+                modalError.classList.remove('hidden');
+            }
+        } else {
+            modalError.textContent = 'Please enter a valid email address.';
+            modalError.classList.remove('hidden');
+        }
+    });
+
+    guestList.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.remove-guest-btn');
+        if (removeBtn) {
+            const guestToRemove = removeBtn.dataset.guest;
+            modalGuests = modalGuests.filter(g => g !== guestToRemove);
+            renderGuests();
+        }
+    });
+
+    addAttachmentBtn.addEventListener('click', () => {
+        const link = eventAttachmentInput.value.trim();
+        if (link) {
+            try {
+                new URL(link); // Validate URL
+                if (!modalAttachments.includes(link)) {
+                    modalAttachments.push(link);
+                    renderAttachments();
+                    eventAttachmentInput.value = '';
+                    modalError.classList.add('hidden');
+                } else {
+                    modalError.textContent = 'Attachment link already added.';
+                    modalError.classList.remove('hidden');
+                }
+            } catch (_) {
+                modalError.textContent = 'Please enter a valid URL.';
+                modalError.classList.remove('hidden');
+            }
+        }
+    });
+
+    attachmentList.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.remove-attachment-btn');
+        if (removeBtn) {
+            const linkToRemove = removeBtn.dataset.link;
+            modalAttachments = modalAttachments.filter(l => l !== linkToRemove);
+            renderAttachments();
+        }
+    });
+    
+    eventGuestInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addGuestBtn.click();
+        }
+    });
+
+    eventAttachmentInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addAttachmentBtn.click();
+        }
+    });
+
+    // Task Listeners
+    taskForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const title = taskInput.value.trim();
+        if (title) {
+            const newTask = {
+                id: Date.now().toString(),
+                title: title,
+                completed: false,
+                dueDate: taskDueDateInput.value || null,
+                createdAt: new Date().toISOString(),
+            };
+            appState.tasks.push(newTask);
+            saveTasks();
+            render();
+            taskForm.reset();
+        }
+    });
+
+    taskList.addEventListener('click', e => {
+        const checkbox = e.target.closest('.task-checkbox');
+        if (checkbox) {
+            const taskId = checkbox.dataset.taskId;
+            const task = appState.tasks.find(t => t.id === taskId);
+            if (task) {
+                task.completed = checkbox.checked;
+                saveTasks();
+                renderTasks(); // Just re-render tasks for responsiveness
+            }
+        }
+
+        const deleteBtn = e.target.closest('.delete-task-btn');
+        if (deleteBtn) {
+            const taskId = deleteBtn.dataset.taskId;
+            appState.tasks = appState.tasks.filter(t => t.id !== taskId);
+            saveTasks();
+            render();
+        }
+    });
+
+    // --- Drag and Drop Logic ---
+    let draggedElement = null;
+
+    viewContainer.addEventListener('dragstart', (e) => {
+        const eventEl = e.target.closest('[data-event-id]');
+        if (eventEl) {
+            draggedElement = eventEl;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', eventEl.dataset.eventId);
+            setTimeout(() => {
+                eventEl.classList.add('opacity-40');
+            }, 0);
+        }
+    });
+
+    viewContainer.addEventListener('dragend', () => {
+        if (draggedElement) {
+            draggedElement.classList.remove('opacity-40');
+            draggedElement = null;
+        }
+        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700'));
+    });
+    
+    let lastDragOverCell = null;
+    viewContainer.addEventListener('dragover', (e) => {
+        e.preventDefault();
+
+        if (appState.viewMode === 'month') {
+            const dayCell = e.target.closest('.day-cell');
+            if (dayCell && dayCell !== lastDragOverCell) {
+                 if(lastDragOverCell) {
+                    lastDragOverCell.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
+                }
+                dayCell.classList.add('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
+                lastDragOverCell = dayCell;
+            }
+        } else if (appState.viewMode === 'day') {
+             const timeline = e.target.closest('#day-view-timeline');
+             if (timeline) {
+                 e.dataTransfer.dropEffect = 'move';
+             }
+        }
+    });
+    
+    viewContainer.addEventListener('dragleave', (e) => {
+        const dayCell = e.target.closest('.day-cell');
+        if (dayCell && dayCell === lastDragOverCell) {
+            dayCell.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
+            lastDragOverCell = null;
+        }
+    });
+
+    viewContainer.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if(lastDragOverCell) {
+            lastDragOverCell.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
+            lastDragOverCell = null;
+        }
+
+        const eventId = e.dataTransfer.getData('text/plain');
+        const event = appState.events.find(ev => ev.id === eventId);
+        if (!event) return;
+
+        if (appState.viewMode === 'month') {
+            const dayCell = e.target.closest('.day-cell');
+            if (dayCell) {
+                const newDateStr = dayCell.dataset.date;
+                
+                const originalStart = new Date(event.start);
+                const originalEnd = new Date(event.end);
+                const duration = originalEnd.getTime() - originalStart.getTime();
+
+                const newStartDate = new Date(newDateStr);
+                newStartDate.setHours(originalStart.getHours(), originalStart.getMinutes(), originalStart.getSeconds(), originalStart.getMilliseconds());
+                
+                const newEndDate = new Date(newStartDate.getTime() + duration);
+
+                event.start = newStartDate.toISOString();
+                event.end = newEndDate.toISOString();
+                
+                saveEvents();
+                render();
+            }
+        } else if (appState.viewMode === 'day') {
+            const timeline = e.target.closest('#day-view-timeline');
+            if (timeline) {
+                const rect = timeline.getBoundingClientRect();
+                const dropY = e.clientY - rect.top;
+                const totalMinutes = (dropY / rect.height) * 24 * 60;
+                
+                const snappedMinutes = Math.round(totalMinutes / 15) * 15;
+                const newHours = Math.floor(snappedMinutes / 60);
+                const newMinutes = snappedMinutes % 60;
+
+                const originalStart = new Date(event.start);
+                const originalEnd = new Date(event.end);
+                const duration = originalEnd.getTime() - originalStart.getTime();
+
+                const newStartDate = new Date(appState.currentDate);
+                newStartDate.setHours(newHours, newMinutes, 0, 0);
+
+                const newEndDate = new Date(newStartDate.getTime() + duration);
+                
+                event.start = newStartDate.toISOString();
+                event.end = newEndDate.toISOString();
+
+                saveEvents();
+                render();
+            }
+        }
+    });
+
 
     // --- Initial Load ---
     render();

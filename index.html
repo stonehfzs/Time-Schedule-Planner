@@ -23,8 +23,8 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             transition: background-color 0.3s, color 0.3s;
         }
-        .view-container {
-            transition: opacity 0.3s ease-in-out;
+        .view-container, #task-sidebar {
+            transition: opacity 0.3s ease-in-out, width 0.3s ease-in-out, transform 0.3s ease-in-out;
         }
         .modal {
             display: none;
@@ -45,12 +45,18 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
             z-index: 10;
         }
+        #task-sidebar.hidden {
+            width: 0;
+            opacity: 0;
+            transform: translateX(100%);
+            padding: 0;
+        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
     <div id="app" class="flex flex-col h-screen">
         <!-- Header -->
-        <header id="app-header" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+        <header id="app-header" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm z-10">
             <div class="flex items-center space-x-4">
                 <h1 class="text-xl font-bold">Schedule</h1>
                 <button id="today-btn" class="px-4 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
@@ -66,15 +72,46 @@
                 </div>
                 <h2 id="header-text" class="text-lg font-semibold w-48 text-center"></h2>
             </div>
-            <div id="view-switcher" class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 p-1 rounded-lg">
-                <button data-view="day" class="px-3 py-1.5 text-sm font-medium rounded-md">Day</button>
-                <button data-view="month" class="px-3 py-1.5 text-sm font-medium rounded-md">Month</button>
-                <button data-view="year" class="px-3 py-1.5 text-sm font-medium rounded-md">Year</button>
+            <div class="flex items-center space-x-4">
+                <div id="view-switcher" class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 p-1 rounded-lg">
+                    <button data-view="day" class="px-3 py-1.5 text-sm font-medium rounded-md">Day</button>
+                    <button data-view="month" class="px-3 py-1.5 text-sm font-medium rounded-md">Month</button>
+                    <button data-view="year" class="px-3 py-1.5 text-sm font-medium rounded-md">Year</button>
+                </div>
+                <button id="toggle-tasks-btn" class="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" aria-label="Toggle tasks sidebar">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                      <path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7zm0 4a1 1 0 100 2h4a1 1 0 100-2H7z" clip-rule="evenodd" />
+                    </svg>
+                </button>
             </div>
         </header>
 
-        <!-- Main Content -->
-        <main id="view-container" class="flex-1 overflow-auto p-4 md:p-6"></main>
+        <!-- Main Content Wrapper -->
+        <div class="flex flex-1 overflow-hidden">
+            <main id="view-container" class="flex-1 overflow-auto p-4 md:p-6"></main>
+
+            <!-- Task Sidebar -->
+            <aside id="task-sidebar" class="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex flex-col">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold">To-Do List</h3>
+                </div>
+                <div class="p-4">
+                    <form id="task-form">
+                        <label for="task-input" class="sr-only">New Task</label>
+                        <input type="text" id="task-input" placeholder="Add a new task..." class="block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 mb-2">
+                        <div class="flex space-x-2">
+                             <input type="date" id="task-due-date-input" class="block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm">
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium text-sm whitespace-nowrap">Add Task</button>
+                        </div>
+                    </form>
+                </div>
+                <div id="task-list" class="flex-1 overflow-y-auto px-4 space-y-2 pb-4">
+                    <!-- Tasks will be rendered here -->
+                </div>
+            </aside>
+        </div>
+
 
         <!-- Event Modal -->
         <div id="event-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
@@ -82,7 +119,7 @@
                 <form id="event-form">
                     <h2 class="text-2xl font-bold mb-4" id="modal-title">Add Event</h2>
                     <input type="hidden" id="event-id">
-                    <div class="space-y-4">
+                    <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                         <div>
                             <label for="event-title" class="block text-sm font-medium">Title</label>
                             <input type="text" id="event-title" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
@@ -90,6 +127,14 @@
                         <div>
                             <label for="event-description" class="block text-sm font-medium">Description</label>
                             <textarea id="event-description" rows="3" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></textarea>
+                        </div>
+                        <div>
+                            <label for="event-location" class="block text-sm font-medium">Location</label>
+                            <input type="text" id="event-location" placeholder="e.g., Conference Room A" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                         <div>
+                            <label for="event-organization" class="block text-sm font-medium">Organization</label>
+                            <input type="text" id="event-organization" placeholder="e.g., Acme Corp" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                         </div>
                         <div class="flex space-x-4">
                             <div class="flex-1">
@@ -101,6 +146,14 @@
                                 <input type="time" id="end-time" value="10:00" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
                             </div>
                         </div>
+                        <div>
+                            <label for="event-guest-input" class="block text-sm font-medium">Guests</label>
+                            <div class="flex mt-1">
+                                <input type="email" id="event-guest-input" placeholder="e.g., guest@example.com" class="block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <button type="button" id="add-guest-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-r-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors font-medium text-sm whitespace-nowrap">Add Guest</button>
+                            </div>
+                            <div id="guest-list" class="mt-2 flex flex-wrap gap-2"></div>
+                        </div>
                          <div>
                             <label for="event-recurring" class="block text-sm font-medium">Repeat</label>
                             <select id="event-recurring" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -109,6 +162,14 @@
                                 <option value="weekly">Weekly</option>
                                 <option value="monthly">Monthly</option>
                             </select>
+                        </div>
+                        <div>
+                            <label for="event-attachment-input" class="block text-sm font-medium">Attachments</label>
+                            <div class="flex mt-1">
+                                <input type="url" id="event-attachment-input" placeholder="https://example.com/file.pdf" class="block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <button type="button" id="add-attachment-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-r-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors font-medium text-sm whitespace-nowrap">Add Link</button>
+                            </div>
+                            <div id="attachment-list" class="mt-2 flex flex-wrap gap-2"></div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium">Color</label>
