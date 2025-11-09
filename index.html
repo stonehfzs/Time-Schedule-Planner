@@ -84,6 +84,11 @@
                       <path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7zm0 4a1 1 0 100 2h4a1 1 0 100-2H7z" clip-rule="evenodd" />
                     </svg>
                 </button>
+                <button id="settings-btn" class="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" aria-label="Open Settings">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01-.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                    </svg>
+                </button>
             </div>
         </header>
 
@@ -186,6 +191,37 @@
                             <button type="button" id="cancel-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">Cancel</button>
                             <button type="submit" id="save-event-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">Save</button>
                         </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-full max-w-md mx-4">
+                <form id="settings-form">
+                    <h2 class="text-2xl font-bold mb-4">Sync Settings</h2>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                        To sync your data across devices, please provide a GitHub Personal Access Token (PAT) and the ID of a secret Gist.
+                    </p>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                        <a href="https://github.com/settings/tokens/new?scopes=gist&description=ScheduleAppToken" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">Click here to create the required Token</a>, then create a <a href="https://gist.github.com/" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">secret Gist</a>.
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="gist-pat" class="block text-sm font-medium">GitHub PAT</label>
+                            <input type="password" id="gist-pat" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label for="gist-id" class="block text-sm font-medium">Gist ID</label>
+                            <input type="text" id="gist-id" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                        <p id="settings-error" class="text-red-500 text-sm hidden"></p>
+                        <p id="settings-success" class="text-green-500 text-sm hidden"></p>
+                    </div>
+                    <div class="mt-6 flex justify-end space-x-2">
+                        <button type="button" id="settings-cancel-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">Save & Sync</button>
                     </div>
                 </form>
             </div>

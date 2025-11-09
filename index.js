@@ -1,13 +1,17 @@
+import { getGistData, saveGistData, verifyGistCredentials } from './services/gistService.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const appState = {
         currentDate: new Date(),
         viewMode: 'month', // 'day', 'month', 'year'
-        events: JSON.parse(localStorage.getItem('schedule_events')) || [],
-        tasks: JSON.parse(localStorage.getItem('schedule_tasks')) || [],
+        events: [],
+        tasks: [],
         selectedDate: new Date(),
         editingEventId: null,
         isTaskSidebarVisible: true,
+        gistPat: localStorage.getItem('gistPat'),
+        gistId: localStorage.getItem('gistId'),
+        isDataLoaded: false,
     };
 
     const colors = ['#0284c7', '#16a34a', '#ca8a04', '#c026d3', '#db2777', '#dc2626'];
@@ -23,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const nextBtn = document.getElementById('next-btn');
     const todayBtn = document.getElementById('today-btn');
     const toggleTasksBtn = document.getElementById('toggle-tasks-btn');
+    const settingsBtn = document.getElementById('settings-btn');
 
     // Task Sidebar Elements
     const taskSidebar = document.getElementById('task-sidebar');
@@ -55,18 +60,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const addAttachmentBtn = document.getElementById('add-attachment-btn');
     const attachmentList = document.getElementById('attachment-list');
 
+    // Settings Modal Elements
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsForm = document.getElementById('settings-form');
+    const gistPatInput = document.getElementById('gist-pat');
+    const gistIdInput = document.getElementById('gist-id');
+    const settingsError = document.getElementById('settings-error');
+    const settingsSuccess = document.getElementById('settings-success');
+    const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+
 
     // --- State Management & Rendering ---
 
-    const saveEvents = () => {
-        localStorage.setItem('schedule_events', JSON.stringify(appState.events));
-    };
-
-    const saveTasks = () => {
-        localStorage.setItem('schedule_tasks', JSON.stringify(appState.tasks));
-    };
-
     const render = () => {
+        if (!appState.isDataLoaded) {
+            viewContainer.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">Loading your schedule...</div>`;
+            return;
+        }
         viewContainer.style.opacity = '0';
         setTimeout(() => {
             updateHeader();
@@ -100,7 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
         }
 
-        // Update active view button
         document.querySelectorAll('#view-switcher button').forEach(btn => {
             if (btn.dataset.view === appState.viewMode) {
                 btn.classList.add('bg-blue-600', 'text-white', 'shadow-sm');
@@ -248,14 +257,14 @@ document.addEventListener('DOMContentLoaded', () => {
         viewContainer.innerHTML = html;
         document.getElementById('day-add-event')?.addEventListener('click', () => openEventModal(date));
 
-        document.getElementById('day-view-tasks').addEventListener('click', e => {
+        document.getElementById('day-view-tasks').addEventListener('click', async e => {
             const checkbox = e.target.closest('.task-checkbox');
             if (checkbox) {
                 const taskId = checkbox.dataset.taskId;
                 const task = appState.tasks.find(t => t.id === taskId);
                 if (task) {
                     task.completed = checkbox.checked;
-                    saveTasks();
+                    await syncData();
                     render(); // Re-render to update styles
                 }
             }
@@ -264,12 +273,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (deleteBtn) {
                 const taskId = deleteBtn.dataset.taskId;
                 appState.tasks = appState.tasks.filter(t => t.id !== taskId);
-                saveTasks();
+                await syncData();
                 render();
             }
         });
     };
 
+
+    // --- Data Sync Logic ---
+    const syncData = async () => {
+        if (appState.gistPat && appState.gistId) {
+            await saveGistData({ events: appState.events, tasks: appState.tasks });
+        }
+    };
 
     // --- Event & Task Logic ---
 
@@ -309,7 +325,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const sortedTasks = [...appState.tasks].sort((a, b) => {
             if (a.completed && !b.completed) return 1;
             if (!a.completed && b.completed) return -1;
-            return new Date(a.createdAt) - new Date(b.createdAt);
+            const dateA = a.createdAt ? new Date(a.createdAt) : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt) : 0;
+            return dateA - dateB;
         });
 
         taskList.innerHTML = sortedTasks.map(task => `
@@ -499,7 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    eventForm.addEventListener('submit', (e) => {
+    eventForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
         const startDateTime = new Date(appState.selectedDate);
@@ -535,16 +553,16 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             appState.events.push(eventData);
         }
-
-        saveEvents();
+        
+        await syncData();
         closeEventModal();
         render();
     });
     
-    deleteEventBtn.addEventListener('click', () => {
+    deleteEventBtn.addEventListener('click', async () => {
         if (!appState.editingEventId) return;
         appState.events = appState.events.filter(event => event.id !== appState.editingEventId);
-        saveEvents();
+        await syncData();
         closeEventModal();
         render();
     });
@@ -621,7 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Task Listeners
-    taskForm.addEventListener('submit', (e) => {
+    taskForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const title = taskInput.value.trim();
         if (title) {
@@ -633,20 +651,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 createdAt: new Date().toISOString(),
             };
             appState.tasks.push(newTask);
-            saveTasks();
+            await syncData();
             render();
             taskForm.reset();
         }
     });
 
-    taskList.addEventListener('click', e => {
+    taskList.addEventListener('click', async e => {
         const checkbox = e.target.closest('.task-checkbox');
         if (checkbox) {
             const taskId = checkbox.dataset.taskId;
             const task = appState.tasks.find(t => t.id === taskId);
             if (task) {
                 task.completed = checkbox.checked;
-                saveTasks();
+                await syncData();
                 renderTasks(); // Just re-render tasks for responsiveness
             }
         }
@@ -655,7 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (deleteBtn) {
             const taskId = deleteBtn.dataset.taskId;
             appState.tasks = appState.tasks.filter(t => t.id !== taskId);
-            saveTasks();
+            await syncData();
             render();
         }
     });
@@ -712,7 +730,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    viewContainer.addEventListener('drop', (e) => {
+    viewContainer.addEventListener('drop', async (e) => {
         e.preventDefault();
         if(lastDragOverCell) {
             lastDragOverCell.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
@@ -740,7 +758,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 event.start = newStartDate.toISOString();
                 event.end = newEndDate.toISOString();
                 
-                saveEvents();
+                await syncData();
                 render();
             }
         } else if (appState.viewMode === 'day') {
@@ -766,13 +784,88 @@ document.addEventListener('DOMContentLoaded', () => {
                 event.start = newStartDate.toISOString();
                 event.end = newEndDate.toISOString();
 
-                saveEvents();
+                await syncData();
                 render();
             }
         }
     });
 
+    // --- Settings Modal Logic ---
+    const openSettingsModal = () => {
+        gistPatInput.value = appState.gistPat || '';
+        gistIdInput.value = appState.gistId || '';
+        settingsError.classList.add('hidden');
+        settingsSuccess.classList.add('hidden');
+        settingsModal.classList.add('is-open');
+    }
+
+    const closeSettingsModal = () => settingsModal.classList.remove('is-open');
+
+    settingsBtn.addEventListener('click', openSettingsModal);
+    settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeSettingsModal() });
+    settingsCancelBtn.addEventListener('click', closeSettingsModal);
+
+    settingsForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pat = gistPatInput.value.trim();
+        const id = gistIdInput.value.trim();
+        settingsError.classList.add('hidden');
+        settingsSuccess.classList.add('hidden');
+
+        if (!pat || !id) {
+            settingsError.textContent = "Both fields are required.";
+            settingsError.classList.remove('hidden');
+            return;
+        }
+
+        const isValid = await verifyGistCredentials(pat, id);
+        if (isValid) {
+            appState.gistPat = pat;
+            appState.gistId = id;
+            localStorage.setItem('gistPat', pat);
+            localStorage.setItem('gistId', id);
+            settingsSuccess.textContent = 'Credentials verified and saved! Syncing data...';
+            settingsSuccess.classList.remove('hidden');
+            
+            await initializeApp();
+
+            setTimeout(() => {
+                closeSettingsModal();
+            }, 1500);
+
+        } else {
+            settingsError.textContent = "Invalid credentials or Gist not found. Please check your PAT and Gist ID.";
+            settingsError.classList.remove('hidden');
+        }
+    });
 
     // --- Initial Load ---
-    render();
+    const initializeApp = async () => {
+        appState.isDataLoaded = false;
+        render();
+
+        if (appState.gistPat && appState.gistId) {
+            const data = await getGistData();
+            if (data) {
+                appState.events = data.events || [];
+                appState.tasks = data.tasks || [];
+            } else {
+                // Handle case where credentials are saved but invalid
+                console.error("Failed to fetch data from Gist. Please check your credentials in Settings.");
+                appState.gistPat = null;
+                appState.gistId = null;
+                localStorage.removeItem('gistPat');
+                localStorage.removeItem('gistId');
+                openSettingsModal(); // Force user to re-enter
+            }
+        } else {
+            // No credentials, prompt user
+            openSettingsModal();
+        }
+        
+        appState.isDataLoaded = true;
+        render();
+    };
+
+    initializeApp();
 });
