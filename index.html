@@ -19,6 +19,9 @@
             --hover-light: #f3f4f6;
             --hover-dark: #374151;
         }
+        html.dark {
+            color-scheme: dark;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             transition: background-color 0.3s, color 0.3s;
@@ -40,18 +43,72 @@
         .day-event {
             transition: all 0.2s ease-in-out;
         }
-        .day-event:hover {
-            transform: scale(1.02);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            z-index: 10;
-        }
         #task-sidebar.hidden {
             width: 0;
             opacity: 0;
             transform: translateX(100%);
             padding: 0;
         }
+
+        /* Drag and Drop Enhancements */
+        .day-event .resize-handle {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .day-event:hover .resize-handle {
+            opacity: 1;
+        }
+        .day-event .resize-handle.top {
+            top: 0;
+        }
+        .day-event .resize-handle.bottom {
+            bottom: 0;
+        }
+        .day-event .resize-handle::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 4px;
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 2px;
+        }
+        #event-placeholder {
+            position: absolute;
+            left: 0.5rem; /* left-2 */
+            right: 0.5rem; /* right-2 */
+            background: rgba(59, 130, 246, 0.3); /* blue-500 with opacity */
+            border: 1px dashed #3b82f6; /* blue-500 */
+            border-radius: 0.5rem; /* rounded-lg */
+            z-index: 5;
+            pointer-events: none;
+            transition: top 0.05s, height 0.05s;
+        }
+        body.is-dragging, body.is-dragging * {
+            cursor: move !important; /* Force move cursor during drag */
+            user-select: none;
+        }
+        body.is-resizing, body.is-resizing * {
+            cursor: ns-resize !important; /* Force resize cursor */
+            user-select: none;
+        }
+
     </style>
+<script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.0"
+  }
+}
+</script>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
     <div id="app" class="flex flex-col h-screen">
@@ -61,6 +118,10 @@
                 <h1 class="text-xl font-bold">Schedule</h1>
                 <button id="today-btn" class="px-4 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                     Today
+                </button>
+                <button id="quick-add-btn" class="flex items-center space-x-2 px-4 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
+                    <span>Quick Add</span>
                 </button>
                 <div class="flex items-center space-x-1">
                     <button id="prev-btn" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
@@ -72,6 +133,21 @@
                 </div>
                 <h2 id="header-text" class="text-lg font-semibold w-48 text-center"></h2>
             </div>
+
+            <div class="flex-1 flex justify-center px-4 md:px-8">
+                <div class="relative w-full max-w-md">
+                    <form id="search-form" role="search">
+                        <label for="search-input" class="sr-only">Search events</label>
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <svg class="h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <input type="search" id="search-input" placeholder="Search events..." class="block w-full pl-10 pr-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 transition-colors">
+                    </form>
+                </div>
+            </div>
+
             <div class="flex items-center space-x-4">
                 <div id="view-switcher" class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 p-1 rounded-lg">
                     <button data-view="day" class="px-3 py-1.5 text-sm font-medium rounded-md">Day</button>
@@ -84,6 +160,36 @@
                       <path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7zm0 4a1 1 0 100 2h4a1 1 0 100-2H7z" clip-rule="evenodd" />
                     </svg>
                 </button>
+                <div class="relative">
+                    <button id="export-btn" class="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" aria-label="Export Data" aria-haspopup="true" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <div id="export-dropdown" class="absolute right-0 mt-2 w-80 origin-top-right bg-white dark:bg-gray-800 rounded-lg shadow-2xl ring-1 ring-black ring-opacity-5 focus:outline-none hidden z-20" role="menu" aria-orientation="vertical" aria-labelledby="export-btn">
+                        <div class="p-4" role="none">
+                            <h2 class="text-xl font-bold mb-2">Export Data</h2>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                                Export your events and tasks to CSV files.
+                            </p>
+                            <div class="space-y-2 mb-4">
+                                <button type="button" id="export-events-btn" class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium text-left">Export Events (CSV)</button>
+                                <button type="button" id="export-tasks-btn" class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium text-left">Export Tasks (CSV)</button>
+                            </div>
+                            <details class="text-xs text-gray-500 dark:text-gray-400">
+                                <summary class="cursor-pointer hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">Show example format</summary>
+                                <div class="mt-2 space-y-2">
+                                    <p class="font-semibold">events.csv</p>
+                                    <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap">id,title,description,start,end,color,location...
+"16...","Team Meeting","Discuss quarterly goals...",...</pre>
+                                    <p class="font-semibold">tasks.csv</p>
+                                    <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap">id,title,completed,dueDate,createdAt
+"16...","Prepare presentation",false,"2023-03-14",...</pre>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                </div>
                 <button id="settings-btn" class="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" aria-label="Open Settings">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01-.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
@@ -166,7 +272,20 @@
                                 <option value="daily">Daily</option>
                                 <option value="weekly">Weekly</option>
                                 <option value="monthly">Monthly</option>
+                                <option value="yearly">Yearly</option>
+                                <option value="custom">Custom...</option>
                             </select>
+                        </div>
+                        <div id="custom-recurrence-settings" class="hidden space-y-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md border border-gray-200 dark:border-gray-600">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-medium">Repeat every</span>
+                                <input type="number" id="recurrence-interval" value="1" min="1" class="w-16 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm">
+                                <select id="recurrence-unit" class="px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm">
+                                    <option value="days">day(s)</option>
+                                    <option value="weeks">week(s)</option>
+                                    <option value="months">month(s)</option>
+                                </select>
+                            </div>
                         </div>
                         <div>
                             <label for="event-attachment-input" class="block text-sm font-medium">Attachments</label>
@@ -178,7 +297,14 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium">Color</label>
-                            <div id="color-picker" class="mt-2 flex space-x-2"></div>
+                            <div class="mt-2 flex items-center space-x-2">
+                                <div id="color-picker" class="flex space-x-2">
+                                    <!-- Swatches rendered by JS -->
+                                </div>
+                                <div id="custom-color-wrapper" class="h-8 w-8 rounded-full overflow-hidden border-2 border-transparent">
+                                    <input type="color" id="custom-color-input" class="w-12 h-12 -translate-x-2 -translate-y-2 border-none cursor-pointer bg-transparent" aria-label="Custom color">
+                                </div>
+                            </div>
                         </div>
                         <p id="modal-error" class="text-red-500 text-sm mt-2 hidden"></p>
                     </div>
@@ -195,12 +321,55 @@
                 </form>
             </div>
         </div>
+
+        <!-- Quick Add Modal -->
+        <div id="quick-add-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-full max-w-lg mx-4">
+                <form id="quick-add-form">
+                    <h2 class="text-2xl font-bold mb-4">Quick Add Event</h2>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                        Describe your event using natural language. For example: <br>
+                        <code class="text-xs bg-gray-100 dark:bg-gray-700 p-1 rounded">"Dentist appointment tomorrow at 3pm for 45 minutes"</code>
+                    </p>
+                    <div>
+                        <label for="quick-add-input" class="sr-only">Event Description</label>
+                        <input type="text" id="quick-add-input" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Type your event details here..." required>
+                    </div>
+                    <p id="quick-add-error" class="text-red-500 text-sm mt-2 hidden"></p>
+                    
+                    <div class="mt-6 flex justify-end space-x-2">
+                        <button type="button" id="quick-add-cancel-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">Cancel</button>
+                        <button type="submit" id="quick-add-save-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center min-w-[80px]">
+                            <span class="btn-text">Create</span>
+                            <svg class="animate-spin h-5 w-5 text-white hidden btn-loader" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
         
         <!-- Settings Modal -->
         <div id="settings-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-full max-w-md mx-4">
                 <form id="settings-form">
-                    <h2 class="text-2xl font-bold mb-4">Sync Settings</h2>
+                    <h2 class="text-2xl font-bold mb-4">Settings</h2>
+                    
+                    <!-- Theme Section -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Theme</label>
+                        <div id="theme-switcher" class="grid grid-cols-3 gap-2 rounded-lg bg-gray-200 dark:bg-gray-700 p-1">
+                            <button type="button" data-theme="light" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">Light</button>
+                            <button type="button" data-theme="dark" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">Dark</button>
+                            <button type="button" data-theme="system" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">System</button>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-gray-200 dark:border-gray-700 my-6"></div>
+
+                    <h3 class="text-lg font-semibold mb-2">Sync Settings</h3>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
                         To sync your data across devices, please provide a GitHub Personal Access Token (PAT) and the ID of a secret Gist.
                     </p>
@@ -219,8 +388,9 @@
                         <p id="settings-error" class="text-red-500 text-sm hidden"></p>
                         <p id="settings-success" class="text-green-500 text-sm hidden"></p>
                     </div>
+                    
                     <div class="mt-6 flex justify-end space-x-2">
-                        <button type="button" id="settings-cancel-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">Cancel</button>
+                        <button type="button" id="settings-cancel-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">Close</button>
                         <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">Save & Sync</button>
                     </div>
                 </form>

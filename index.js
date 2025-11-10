@@ -1,4 +1,7 @@
+
+
 import { getGistData, saveGistData, verifyGistCredentials } from './services/gistService.js';
+import { parseEventFromString } from './services/geminiService.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const appState = {
@@ -11,7 +14,10 @@ document.addEventListener('DOMContentLoaded', () => {
         isTaskSidebarVisible: true,
         gistPat: localStorage.getItem('gistPat'),
         gistId: localStorage.getItem('gistId'),
+        theme: localStorage.getItem('theme') || 'system',
         isDataLoaded: false,
+        searchQuery: '',
+        activeInteraction: null, // For custom drag/resize in day view
     };
 
     const colors = ['#0284c7', '#16a34a', '#ca8a04', '#c026d3', '#db2777', '#dc2626'];
@@ -26,8 +32,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const todayBtn = document.getElementById('today-btn');
+    const quickAddBtn = document.getElementById('quick-add-btn');
     const toggleTasksBtn = document.getElementById('toggle-tasks-btn');
+    const exportBtn = document.getElementById('export-btn');
     const settingsBtn = document.getElementById('settings-btn');
+    const searchForm = document.getElementById('search-form');
+    const searchInput = document.getElementById('search-input');
 
     // Task Sidebar Elements
     const taskSidebar = document.getElementById('task-sidebar');
@@ -48,7 +58,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const startTimeInput = document.getElementById('start-time');
     const endTimeInput = document.getElementById('end-time');
     const eventRecurringInput = document.getElementById('event-recurring');
+    const customRecurrenceSettings = document.getElementById('custom-recurrence-settings');
+    const recurrenceIntervalInput = document.getElementById('recurrence-interval');
+    const recurrenceUnitInput = document.getElementById('recurrence-unit');
     const colorPicker = document.getElementById('color-picker');
+    const customColorInput = document.getElementById('custom-color-input');
     const modalError = document.getElementById('modal-error');
     const saveEventBtn = document.getElementById('save-event-btn');
     const deleteEventBtn = document.getElementById('delete-event-btn');
@@ -60,14 +74,60 @@ document.addEventListener('DOMContentLoaded', () => {
     const addAttachmentBtn = document.getElementById('add-attachment-btn');
     const attachmentList = document.getElementById('attachment-list');
 
+    // Quick Add Modal Elements
+    const quickAddModal = document.getElementById('quick-add-modal');
+    const quickAddForm = document.getElementById('quick-add-form');
+    const quickAddInput = document.getElementById('quick-add-input');
+    const quickAddError = document.getElementById('quick-add-error');
+    const quickAddSaveBtn = document.getElementById('quick-add-save-btn');
+    const quickAddCancelBtn = document.getElementById('quick-add-cancel-btn');
+
     // Settings Modal Elements
     const settingsModal = document.getElementById('settings-modal');
     const settingsForm = document.getElementById('settings-form');
+    const themeSwitcher = document.getElementById('theme-switcher');
     const gistPatInput = document.getElementById('gist-pat');
     const gistIdInput = document.getElementById('gist-id');
     const settingsError = document.getElementById('settings-error');
     const settingsSuccess = document.getElementById('settings-success');
     const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+
+    // Export Dropdown Elements
+    const exportDropdown = document.getElementById('export-dropdown');
+    const exportEventsBtn = document.getElementById('export-events-btn');
+    const exportTasksBtn = document.getElementById('export-tasks-btn');
+
+
+    // --- Theme Management ---
+    const updateThemeSwitcherUI = () => {
+        document.querySelectorAll('#theme-switcher .theme-btn').forEach(btn => {
+            if (btn.dataset.theme === appState.theme) {
+                btn.classList.add('bg-white', 'dark:bg-gray-900', 'shadow-sm');
+                btn.classList.remove('text-gray-600', 'dark:text-gray-300');
+            } else {
+                btn.classList.remove('bg-white', 'dark:bg-gray-900', 'shadow-sm');
+                btn.classList.add('text-gray-600', 'dark:text-gray-300');
+            }
+        });
+    };
+
+    const applyTheme = (theme) => {
+        appState.theme = theme;
+        localStorage.setItem('theme', theme);
+        
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else if (theme === 'light') {
+            document.documentElement.classList.remove('dark');
+        } else { // system
+            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        }
+        updateThemeSwitcherUI();
+    };
 
 
     // --- State Management & Rendering ---
@@ -123,6 +183,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- View Rendering ---
 
+    const monthHasSearchResults = (year, month) => {
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(year, month, day);
+            if (getEventsForDate(date).length > 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     const renderYearView = () => {
         const year = appState.currentDate.getFullYear();
         const monthNames = Array.from({ length: 12 }, (_, i) => new Date(0, i).toLocaleString('en-US', { month: 'long' }));
@@ -132,13 +203,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         monthNames.forEach((name, index) => {
             const isCurrentMonth = index === today.getMonth() && year === today.getFullYear();
+            const hasResults = appState.searchQuery ? monthHasSearchResults(year, index) : false;
+            const hasResultsIndicator = hasResults ? '<span class="absolute top-2 right-2 h-2.5 w-2.5 bg-blue-500 rounded-full" title="Event found in this month"></span>' : '';
+            
             html += `
                 <button
                     data-month="${index}"
-                    class="month-btn p-4 sm:p-6 rounded-lg text-center font-semibold transition-all duration-200 ease-in-out transform hover:-translate-y-1 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500
+                    class="month-btn relative p-4 sm:p-6 rounded-lg text-center font-semibold transition-all duration-200 ease-in-out transform hover:-translate-y-1 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500
                     ${isCurrentMonth ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 hover:bg-blue-100 dark:hover:bg-blue-900'}"
                 >
                     ${name}
+                    ${hasResultsIndicator}
                 </button>
             `;
         });
@@ -172,14 +247,32 @@ document.addEventListener('DOMContentLoaded', () => {
         
         for (let day = 1; day <= daysInMonth; day++) {
             const currentDate = new Date(year, month, day);
+            currentDate.setHours(0,0,0,0);
             const isTodayClass = currentDate.getTime() === today.getTime() ? 'bg-blue-600 text-white rounded-full h-7 w-7 flex items-center justify-center' : '';
             const dayEvents = getEventsForDate(currentDate);
             const dayTasks = getTasksForDate(currentDate);
+            
+            const incompleteTasks = dayTasks.filter(t => !t.completed);
+            let taskIndicatorHtml = '';
+            if (incompleteTasks.length > 0) {
+                const isOverdue = currentDate < today;
+                const isDueToday = currentDate.getTime() === today.getTime();
+                let indicatorClass = 'bg-green-500'; // Upcoming
+                let title = `${incompleteTasks.length} upcoming task(s)`;
+                if (isOverdue) {
+                    indicatorClass = 'bg-red-500';
+                    title = `${incompleteTasks.length} overdue task(s)`;
+                } else if (isDueToday) {
+                    indicatorClass = 'bg-yellow-500';
+                    title = `${incompleteTasks.length} task(s) due today`;
+                }
+                taskIndicatorHtml = `<div class="absolute top-1 right-1 h-2 w-2 rounded-full ${indicatorClass}" title="${title}"></div>`;
+            }
 
             html += `
                 <div class="day-cell relative p-2 border-r border-b border-gray-200 dark:border-gray-700 flex flex-col group hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer" data-date="${currentDate.toISOString()}">
                     <time datetime="${currentDate.toISOString()}" class="text-sm font-medium ${isTodayClass}">${day}</time>
-                    ${dayTasks.length > 0 ? `<div class="absolute top-1 right-1 h-2 w-2 rounded-full bg-green-500" title="${dayTasks.length} task(s)"></div>` : ''}
+                    ${taskIndicatorHtml}
                     <div class="mt-1 space-y-1 overflow-y-auto max-h-24">
                         ${dayEvents.slice(0, 2).map(event => `<div class="month-event text-xs px-1.5 py-0.5 rounded text-white cursor-move" draggable="true" data-event-id="${event.id}" style="background-color: ${event.color};">${event.title}</div>`).join('')}
                         ${dayEvents.length > 2 ? `<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">+ ${dayEvents.length - 2} more</div>` : ''}
@@ -195,21 +288,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderDayView = () => {
         const date = appState.currentDate;
+        date.setHours(0,0,0,0);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+
         const hours = Array.from({ length: 24 }, (_, i) => i);
         const dayEvents = getEventsForDate(date);
         const dayTasks = getTasksForDate(date);
 
+        const isOverdue = date < today;
+        const isDueToday = date.getTime() === today.getTime();
+
         const formatTime = (hour) => new Date(0,0,0,hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
 
-        const taskHtml = dayTasks.map(task => `
-            <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
-                <div class="flex items-center">
-                    <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
-                    <label class="ml-3 ${task.completed ? 'line-through text-gray-500' : ''}">${task.title}</label>
+        const taskHtml = dayTasks.map(task => {
+             let statusIndicator = '';
+            if (!task.completed) {
+                if (isOverdue) {
+                    statusIndicator = '<span class="h-2 w-2 rounded-full bg-red-500 flex-shrink-0" title="Overdue"></span>';
+                } else if (isDueToday) {
+                    statusIndicator = '<span class="h-2 w-2 rounded-full bg-yellow-500 flex-shrink-0" title="Due today"></span>';
+                }
+            }
+            return `
+                <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                    <div class="flex items-center min-w-0">
+                        <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
+                        <div class="ml-3 flex items-center gap-2 min-w-0">
+                            ${statusIndicator}
+                            <label class="truncate ${task.completed ? 'line-through text-gray-500' : ''}">${task.title}</label>
+                        </div>
+                    </div>
+                    <button class="delete-task-btn text-gray-400 hover:text-red-500 font-bold text-lg ml-2 flex-shrink-0" data-task-id="${task.id}" aria-label="Delete task">&times;</button>
                 </div>
-                <button class="delete-task-btn text-gray-400 hover:text-red-500 font-bold text-lg" data-task-id="${task.id}" aria-label="Delete task">&times;</button>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         let html = `
             <div class="bg-white dark:bg-gray-900 rounded-lg shadow-lg flex flex-col h-full">
@@ -239,13 +352,22 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const duration = (end.getTime() - start.getTime()) / (1000 * 60);
                                 const height = (duration / (24 * 60)) * 100;
                                 return `
-                                    <div class="day-event absolute left-2 right-2 p-2 text-white rounded-lg shadow-md cursor-pointer overflow-hidden cursor-move" 
+                                    <div class="day-event absolute left-2 right-2 p-2 text-white rounded-lg shadow-md cursor-move" 
                                          style="top: ${top}%; height: ${Math.max(height, 2)}%; background-color: ${event.color};"
-                                         data-event-id="${event.id}"
-                                         draggable="true">
-                                        <p class="font-bold text-sm">${event.title}</p>
-                                        <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
-                                        ${event.location ? `<p class="text-xs opacity-80 mt-1 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
+                                         data-event-id="${event.id}">
+                                        <div class="resize-handle top" data-handle="top"></div>
+                                        <div class="event-content h-full overflow-hidden flex flex-col justify-start">
+                                            <div class="flex-shrink-0">
+                                                <p class="font-bold text-sm truncate">${event.title}</p>
+                                                <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                                            </div>
+                                            <div class="text-xs opacity-80 mt-1 space-y-0.5 overflow-hidden flex-grow">
+                                                ${event.location ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
+                                                ${(event.guests && event.guests.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0110 14.07a5 5 0 01-1.5-1.4c-.046.327-.07.66-.07 1a7 7 0 001.07 3.84.5.5 0 00.86 0A7 7 0 0012.93 17zM10 12a4 4 0 100-8 4 4 0 000 8z" /></svg>${event.guests.length} ${event.guests.length > 1 ? 'guests' : 'guest'}</p>` : ''}
+                                                ${(event.attachments && event.attachments.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a3 3 0 00-3 3v4a3 3 0 006 0V7a1 1 0 112 0v4a5 5 0 01-10 0V7a5 5 0 0110 0v4a1 1 0 11-2 0V7a3 3 0 00-3-3z" clip-rule="evenodd" /></svg>${event.attachments.length} ${event.attachments.length > 1 ? 'attachments' : 'attachment'}</p>` : ''}
+                                            </div>
+                                        </div>
+                                        <div class="resize-handle bottom" data-handle="bottom"></div>
                                     </div>
                                 `;
                             }).join('')}
@@ -290,30 +412,83 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event & Task Logic ---
 
     const getEventsForDate = (date) => {
-        const dateString = date.toDateString();
-        const dayOfWeek = date.getDay();
-        const dayOfMonth = date.getDate();
+        const query = appState.searchQuery ? appState.searchQuery.toLowerCase().trim() : null;
+
+        const dateWithoutTime = new Date(date);
+        dateWithoutTime.setHours(0, 0, 0, 0);
+        const dateString = dateWithoutTime.toDateString();
 
         return appState.events.filter(event => {
-            const eventStart = new Date(event.start);
-            eventStart.setHours(0,0,0,0);
+            if (query) {
+                const titleMatch = event.title && event.title.toLowerCase().includes(query);
+                const descMatch = event.description && event.description.toLowerCase().includes(query);
+                const locationMatch = event.location && event.location.toLowerCase().includes(query);
+                if (!titleMatch && !descMatch && !locationMatch) {
+                    return false;
+                }
+            }
 
-            if (event.recurring === 'none') {
-                return new Date(event.start).toDateString() === dateString;
+            const eventStart = new Date(event.start);
+            eventStart.setHours(0, 0, 0, 0);
+
+            if (eventStart.getTime() > dateWithoutTime.getTime()) {
+                return false;
             }
-            if (eventStart.getTime() > date.getTime()) return false;
+
+            const recurring = event.recurring;
+
+            if (!recurring) { // Includes null and undefined
+                return eventStart.toDateString() === dateString;
+            }
             
-            if (event.recurring === 'daily') {
-                return true;
+            const dayOfWeek = dateWithoutTime.getDay();
+            const dayOfMonth = dateWithoutTime.getDate();
+            const month = dateWithoutTime.getMonth();
+
+            const eventStartDayOfWeek = eventStart.getDay();
+            const eventStartDayOfMonth = eventStart.getDate();
+            const eventStartMonth = eventStart.getMonth();
+            
+            switch (recurring.type) {
+                case 'daily':
+                    return true;
+                case 'weekly':
+                    return eventStartDayOfWeek === dayOfWeek;
+                case 'monthly':
+                    return eventStartDayOfMonth === dayOfMonth;
+                case 'yearly':
+                    return eventStartDayOfMonth === dayOfMonth && eventStartMonth === month;
+                case 'custom': {
+                    const interval = parseInt(recurring.interval, 10) || 1;
+                    if (interval <= 0) return false;
+
+                    switch (recurring.unit) {
+                        case 'days': {
+                            const diffTime = dateWithoutTime.getTime() - eventStart.getTime();
+                            const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                            return diffDays % interval === 0;
+                        }
+                        case 'weeks': {
+                            if (eventStartDayOfWeek !== dayOfWeek) return false;
+                            const diffTime = dateWithoutTime.getTime() - eventStart.getTime();
+                            const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                            const diffWeeks = Math.floor(diffDays / 7);
+                            return diffWeeks % interval === 0;
+                        }
+                        case 'months': {
+                             if (eventStartDayOfMonth !== dayOfMonth) return false;
+                             const yearDiff = dateWithoutTime.getFullYear() - eventStart.getFullYear();
+                             const monthDiff = yearDiff * 12 + dateWithoutTime.getMonth() - eventStart.getMonth();
+                             return monthDiff % interval === 0;
+                        }
+                        default:
+                            return false;
+                    }
+                }
+                default:
+                    return false;
             }
-            if (event.recurring === 'weekly') {
-                return new Date(event.start).getDay() === dayOfWeek;
-            }
-            if (event.recurring === 'monthly') {
-                return new Date(event.start).getDate() === dayOfMonth;
-            }
-            return false;
-        }).sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     };
 
     const getTasksForDate = (date) => {
@@ -330,18 +505,41 @@ document.addEventListener('DOMContentLoaded', () => {
             return dateA - dateB;
         });
 
-        taskList.innerHTML = sortedTasks.map(task => `
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        taskList.innerHTML = sortedTasks.map(task => {
+            let dueDateHtml = '';
+            if (task.dueDate) {
+                const dueDate = new Date(task.dueDate + 'T00:00:00');
+                let dateClass = 'text-gray-400 dark:text-gray-500';
+                let dateText = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+                if (!task.completed) {
+                    if (dueDate < today) {
+                        dateClass = 'text-red-500 font-medium';
+                        dateText += ' (Overdue)';
+                    } else if (dueDate.getTime() === today.getTime()) {
+                        dateClass = 'text-yellow-600 dark:text-yellow-500 font-medium';
+                        dateText = 'Today';
+                    }
+                }
+                dueDateHtml = `<p class="text-xs ${dateClass}">${dateText}</p>`;
+            }
+
+            return `
             <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
                 <div class="flex items-center overflow-hidden">
                     <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 flex-shrink-0" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
                     <div class="ml-3 truncate">
                         <label class="${task.completed ? 'line-through text-gray-500' : ''}">${task.title}</label>
-                        ${task.dueDate ? `<p class="text-xs text-gray-400 dark:text-gray-500">${new Date(task.dueDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>` : ''}
+                        ${dueDateHtml}
                     </div>
                 </div>
                 <button class="delete-task-btn text-gray-400 hover:text-red-500 font-bold text-lg ml-2 flex-shrink-0" data-task-id="${task.id}" aria-label="Delete task">&times;</button>
             </div>
-        `).join('');
+            `;
+        }).join('');
     };
     
     const updateTaskSidebarVisibility = () => {
@@ -386,6 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalGuests = [];
         modalAttachments = [];
         modalError.classList.add('hidden');
+        customRecurrenceSettings.classList.add('hidden');
 
         if (eventId) {
             const event = appState.events.find(e => e.id === eventId);
@@ -397,7 +596,21 @@ document.addEventListener('DOMContentLoaded', () => {
             eventOrganizationInput.value = event.organization || '';
             startTimeInput.value = new Date(event.start).toTimeString().substring(0, 5);
             endTimeInput.value = new Date(event.end).toTimeString().substring(0, 5);
-            eventRecurringInput.value = event.recurring || 'none';
+            
+            const recurring = event.recurring;
+            if (recurring) {
+                if (recurring.type === 'custom') {
+                    eventRecurringInput.value = 'custom';
+                    recurrenceIntervalInput.value = recurring.interval || 1;
+                    recurrenceUnitInput.value = recurring.unit || 'days';
+                    customRecurrenceSettings.classList.remove('hidden');
+                } else {
+                    eventRecurringInput.value = recurring.type;
+                }
+            } else {
+                eventRecurringInput.value = 'none';
+            }
+
             selectedColor = event.color;
             modalGuests = event.guests || [];
             modalAttachments = event.attachments || [];
@@ -427,13 +640,32 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     
     const updateColorPicker = () => {
+        // Render swatches
         colorPicker.innerHTML = colors.map(c => `
             <button type="button" data-color="${c}" class="h-8 w-8 rounded-full transition-transform transform hover:scale-110 ${selectedColor === c ? 'ring-2 ring-offset-2 ring-blue-500 dark:ring-offset-gray-800' : ''}" style="background-color: ${c}"></button>
         `).join('');
+        
+        // Update custom color input's value. The browser will then show this color.
+        customColorInput.value = selectedColor;
+    
+        const isCustom = !colors.includes(selectedColor);
+        const customColorWrapper = document.getElementById('custom-color-wrapper');
+        
+        const ringClasses = ['ring-2', 'ring-offset-2', 'ring-blue-500', 'dark:ring-offset-gray-800'];
+        if (isCustom) {
+            customColorWrapper.classList.add(...ringClasses);
+        } else {
+            customColorWrapper.classList.remove(...ringClasses);
+        }
     };
 
 
     // --- Event Listeners ---
+    searchForm.addEventListener('submit', e => e.preventDefault());
+    searchInput.addEventListener('input', () => {
+        appState.searchQuery = searchInput.value;
+        render();
+    });
 
     viewSwitcher.addEventListener('click', (e) => {
         if (e.target.tagName === 'BUTTON') {
@@ -493,9 +725,9 @@ document.addEventListener('DOMContentLoaded', () => {
             openEventModal(date);
         }
         
-        const dayEvent = e.target.closest('.day-event, .month-event');
+        const dayEvent = e.target.closest('.day-event .event-content, .month-event');
         if (dayEvent) {
-             const eventId = dayEvent.dataset.eventId;
+             const eventId = dayEvent.closest('[data-event-id]').dataset.eventId;
              const event = appState.events.find(e => e.id === eventId);
              if(event) {
                 openEventModal(new Date(event.start), eventId);
@@ -517,6 +749,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    customColorInput.addEventListener('input', e => {
+        selectedColor = e.target.value;
+        updateColorPicker();
+    });
+
+    eventRecurringInput.addEventListener('change', () => {
+        if (eventRecurringInput.value === 'custom') {
+            customRecurrenceSettings.classList.remove('hidden');
+        } else {
+            customRecurrenceSettings.classList.add('hidden');
+        }
+    });
+
     eventForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -534,6 +779,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
+        let recurring = null;
+        const recurringType = eventRecurringInput.value;
+        if (recurringType !== 'none') {
+            if (recurringType === 'custom') {
+                recurring = {
+                    type: 'custom',
+                    interval: parseInt(recurrenceIntervalInput.value, 10) || 1,
+                    unit: recurrenceUnitInput.value
+                };
+            } else {
+                recurring = { type: recurringType };
+            }
+        }
+
         const eventData = {
             id: appState.editingEventId || Date.now().toString(),
             title: eventTitleInput.value,
@@ -541,7 +800,7 @@ document.addEventListener('DOMContentLoaded', () => {
             start: startDateTime.toISOString(),
             end: endDateTime.toISOString(),
             color: selectedColor,
-            recurring: eventRecurringInput.value,
+            recurring: recurring,
             location: eventLocationInput.value.trim(),
             organization: eventOrganizationInput.value.trim(),
             guests: modalGuests,
@@ -681,7 +940,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Drag and Drop Logic ---
     let draggedElement = null;
 
+    // Native D&D for Month View
     viewContainer.addEventListener('dragstart', (e) => {
+        if (appState.viewMode !== 'month') {
+            e.preventDefault();
+            return;
+        }
         const eventEl = e.target.closest('[data-event-id]');
         if (eventEl) {
             draggedElement = eventEl;
@@ -714,11 +978,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 dayCell.classList.add('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
                 lastDragOverCell = dayCell;
             }
-        } else if (appState.viewMode === 'day') {
-             const timeline = e.target.closest('#day-view-timeline');
-             if (timeline) {
-                 e.dataTransfer.dropEffect = 'move';
-             }
         }
     });
     
@@ -761,32 +1020,281 @@ document.addEventListener('DOMContentLoaded', () => {
                 await syncData();
                 render();
             }
-        } else if (appState.viewMode === 'day') {
-            const timeline = e.target.closest('#day-view-timeline');
-            if (timeline) {
-                const rect = timeline.getBoundingClientRect();
-                const dropY = e.clientY - rect.top;
-                const totalMinutes = (dropY / rect.height) * 24 * 60;
-                
-                const snappedMinutes = Math.round(totalMinutes / 15) * 15;
-                const newHours = Math.floor(snappedMinutes / 60);
-                const newMinutes = snappedMinutes % 60;
+        }
+    });
 
-                const originalStart = new Date(event.start);
-                const originalEnd = new Date(event.end);
-                const duration = originalEnd.getTime() - originalStart.getTime();
+    // Custom Drag & Resize for Day View
+    const pixelsToMinutes = (pixels, timelineHeight) => (pixels / timelineHeight) * (24 * 60);
 
-                const newStartDate = new Date(appState.currentDate);
-                newStartDate.setHours(newHours, newMinutes, 0, 0);
+    viewContainer.addEventListener('mousedown', e => {
+        if (appState.viewMode !== 'day' || e.button !== 0) return;
 
-                const newEndDate = new Date(newStartDate.getTime() + duration);
-                
-                event.start = newStartDate.toISOString();
-                event.end = newEndDate.toISOString();
+        const eventEl = e.target.closest('.day-event');
+        if (!eventEl) return;
 
+        const eventId = eventEl.dataset.eventId;
+        const event = appState.events.find(ev => ev.id === eventId);
+        if (!event) return;
+
+        const timeline = document.getElementById('day-view-timeline');
+        const timelineRect = timeline.getBoundingClientRect();
+        
+        const handle = e.target.closest('.resize-handle');
+        let type;
+
+        if (handle) {
+            type = handle.dataset.handle === 'top' ? 'resize-start' : 'resize-end';
+            document.body.classList.add('is-resizing');
+        } else {
+            type = 'move';
+            document.body.classList.add('is-dragging');
+        }
+        e.preventDefault();
+
+        const placeholder = document.createElement('div');
+        placeholder.id = 'event-placeholder';
+        placeholder.style.top = eventEl.style.top;
+        placeholder.style.height = eventEl.style.height;
+        timeline.appendChild(placeholder);
+        eventEl.style.opacity = '0.5';
+
+        appState.activeInteraction = {
+            type,
+            eventId,
+            initialY: e.clientY,
+            initialStart: new Date(event.start),
+            initialEnd: new Date(event.end),
+            timelineRect,
+            placeholder,
+            originalElement: eventEl,
+        };
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!appState.activeInteraction) return;
+
+        const { type, initialY, initialStart, initialEnd, timelineRect, placeholder } = appState.activeInteraction;
+        
+        const deltaY = e.clientY - initialY;
+        let deltaMinutes = pixelsToMinutes(deltaY, timelineRect.height);
+        deltaMinutes = Math.round(deltaMinutes / 15) * 15;
+
+        let newStart = new Date(initialStart);
+        let newEnd = new Date(initialEnd);
+        const minDuration = 15;
+
+        if (type === 'move') {
+            newStart.setMinutes(initialStart.getMinutes() + deltaMinutes);
+            newEnd.setMinutes(initialEnd.getMinutes() + deltaMinutes);
+        } else if (type === 'resize-end') {
+            newEnd.setMinutes(initialEnd.getMinutes() + deltaMinutes);
+            if ((newEnd.getTime() - newStart.getTime()) / (1000 * 60) < minDuration) {
+                newEnd = new Date(newStart.getTime() + minDuration * 60 * 1000);
+            }
+        } else if (type === 'resize-start') {
+            newStart.setMinutes(initialStart.getMinutes() + deltaMinutes);
+            if ((newEnd.getTime() - newStart.getTime()) / (1000 * 60) < minDuration) {
+                newStart = new Date(newEnd.getTime() - minDuration * 60 * 1000);
+            }
+        }
+
+        const top = ((newStart.getHours() * 60 + newStart.getMinutes()) / (24 * 60)) * 100;
+        const duration = (newEnd.getTime() - newStart.getTime()) / (1000 * 60);
+        const height = (duration / (24 * 60)) * 100;
+
+        placeholder.style.top = `${top}%`;
+        placeholder.style.height = `${Math.max(height, 0)}%`;
+
+        appState.activeInteraction.newStart = newStart;
+        appState.activeInteraction.newEnd = newEnd;
+    });
+
+    document.addEventListener('mouseup', async () => {
+        if (!appState.activeInteraction) return;
+
+        const { eventId, newStart, newEnd, placeholder, originalElement } = appState.activeInteraction;
+        
+        document.body.classList.remove('is-dragging', 'is-resizing');
+        placeholder.remove();
+        originalElement.style.opacity = '1';
+
+        const hasChanged = newStart && newEnd && (newStart.getTime() !== new Date(appState.events.find(ev => ev.id === eventId).start).getTime() || newEnd.getTime() !== new Date(appState.events.find(ev => ev.id === eventId).end).getTime());
+
+        if (hasChanged) {
+            const event = appState.events.find(ev => ev.id === eventId);
+            if (event) {
+                event.start = newStart.toISOString();
+                event.end = newEnd.toISOString();
                 await syncData();
                 render();
             }
+        }
+        
+        appState.activeInteraction = null;
+    });
+
+    // --- CSV Export Logic ---
+    const escapeCsvCell = (cell) => {
+        if (cell === null || cell === undefined) {
+            return '';
+        }
+        const str = String(cell);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    };
+
+    const convertToCsv = (data, headers) => {
+        const headerRow = headers.map(h => escapeCsvCell(h.label)).join(',');
+        const rows = data.map(item => {
+            return headers.map(header => {
+                const value = header.key.split('.').reduce((o, i) => (o ? o[i] : undefined), item);
+                return escapeCsvCell(header.formatter ? header.formatter(value) : value);
+            }).join(',');
+        });
+        return [headerRow, ...rows].join('\n');
+    };
+
+    const downloadFile = (content, filename, mimeType) => {
+        // Add a UTF-8 Byte Order Mark (BOM) to ensure Excel opens the file correctly with special characters.
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+        const blob = new Blob([bom, content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    exportEventsBtn.addEventListener('click', () => {
+        if (appState.events.length === 0) {
+            alert("No events to export.");
+            return;
+        }
+
+        const headers = [
+            { key: 'id', label: 'id' },
+            { key: 'title', label: 'title' },
+            { key: 'description', label: 'description' },
+            { key: 'start', label: 'start' },
+            { key: 'end', label: 'end' },
+            { key: 'color', label: 'color' },
+            { key: 'location', label: 'location' },
+            { key: 'organization', label: 'organization' },
+            { key: 'guests', label: 'guests', formatter: (guests) => (guests || []).join(', ') },
+            { key: 'attachments', label: 'attachments', formatter: (attachments) => (attachments || []).join(', ') },
+            { key: 'recurring.type', label: 'recurring_type' },
+            { key: 'recurring.interval', label: 'recurring_interval' },
+            { key: 'recurring.unit', label: 'recurring_unit' },
+        ];
+
+        const csvContent = convertToCsv(appState.events, headers);
+        downloadFile(csvContent, 'events.csv', 'text/csv;charset=utf-8;');
+    });
+
+    exportTasksBtn.addEventListener('click', () => {
+        if (appState.tasks.length === 0) {
+            alert("No tasks to export.");
+            return;
+        }
+        
+        const headers = [
+            { key: 'id', label: 'id' },
+            { key: 'title', label: 'title' },
+            { key: 'completed', label: 'completed' },
+            { key: 'dueDate', label: 'dueDate' },
+            { key: 'createdAt', label: 'createdAt' },
+        ];
+
+        const csvContent = convertToCsv(appState.tasks, headers);
+        downloadFile(csvContent, 'tasks.csv', 'text/csv;charset=utf-8;');
+    });
+
+    // --- Quick Add Modal Logic ---
+    const openQuickAddModal = () => {
+        quickAddForm.reset();
+        quickAddError.classList.add('hidden');
+        const saveBtnText = quickAddSaveBtn.querySelector('.btn-text');
+        const saveBtnLoader = quickAddSaveBtn.querySelector('.btn-loader');
+        saveBtnText.classList.remove('hidden');
+        saveBtnLoader.classList.add('hidden');
+        quickAddSaveBtn.disabled = false;
+        quickAddModal.classList.add('is-open');
+        quickAddInput.focus();
+    };
+
+    const closeQuickAddModal = () => {
+        quickAddModal.classList.remove('is-open');
+    };
+
+    quickAddBtn.addEventListener('click', openQuickAddModal);
+    quickAddModal.addEventListener('click', e => { if (e.target === quickAddModal) closeQuickAddModal(); });
+    quickAddCancelBtn.addEventListener('click', closeQuickAddModal);
+
+    quickAddForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const prompt = quickAddInput.value.trim();
+        if (!prompt) return;
+
+        quickAddError.classList.add('hidden');
+        const saveBtnText = quickAddSaveBtn.querySelector('.btn-text');
+        const saveBtnLoader = quickAddSaveBtn.querySelector('.btn-loader');
+
+        // Show loading state
+        saveBtnText.classList.add('hidden');
+        saveBtnLoader.classList.remove('hidden');
+        quickAddSaveBtn.disabled = true;
+
+        try {
+            const parsedData = await parseEventFromString(prompt);
+
+            if (!parsedData.title || !parsedData.date || !parsedData.startTime || !parsedData.endTime) {
+                throw new Error("Couldn't extract all required event details.");
+            }
+
+            const [startHour, startMinute] = parsedData.startTime.split(':').map(Number);
+            const [endHour, endMinute] = parsedData.endTime.split(':').map(Number);
+
+            const [year, month, day] = parsedData.date.split('-').map(Number);
+
+            const startDateTime = new Date(year, month - 1, day, startHour, startMinute);
+            const endDateTime = new Date(year, month - 1, day, endHour, endMinute);
+            
+            if (endDateTime < startDateTime) {
+                endDateTime.setDate(endDateTime.getDate() + 1);
+            }
+
+            const newEvent = {
+                id: Date.now().toString(),
+                title: parsedData.title,
+                description: '',
+                start: startDateTime.toISOString(),
+                end: endDateTime.toISOString(),
+                color: colors[Math.floor(Math.random() * colors.length)],
+                recurring: null,
+                location: '',
+                organization: '',
+                guests: [],
+                attachments: [],
+            };
+
+            appState.events.push(newEvent);
+            await syncData();
+            closeQuickAddModal();
+            render();
+
+        } catch (error) {
+            quickAddError.textContent = error.message || "An unexpected error occurred.";
+            quickAddError.classList.remove('hidden');
+        } finally {
+            // Hide loading state
+            saveBtnText.classList.remove('hidden');
+            saveBtnLoader.classList.add('hidden');
+            quickAddSaveBtn.disabled = false;
         }
     });
 
@@ -796,10 +1304,19 @@ document.addEventListener('DOMContentLoaded', () => {
         gistIdInput.value = appState.gistId || '';
         settingsError.classList.add('hidden');
         settingsSuccess.classList.add('hidden');
+        updateThemeSwitcherUI();
         settingsModal.classList.add('is-open');
     }
 
     const closeSettingsModal = () => settingsModal.classList.remove('is-open');
+
+    themeSwitcher.addEventListener('click', (e) => {
+        const themeBtn = e.target.closest('.theme-btn');
+        if (themeBtn) {
+            const newTheme = themeBtn.dataset.theme;
+            applyTheme(newTheme);
+        }
+    });
 
     settingsBtn.addEventListener('click', openSettingsModal);
     settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeSettingsModal() });
@@ -839,6 +1356,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // --- Export Dropdown Logic ---
+    const toggleExportDropdown = (e) => {
+        e.stopPropagation();
+        const isHidden = exportDropdown.classList.toggle('hidden');
+        exportBtn.setAttribute('aria-expanded', !isHidden);
+    };
+
+    const closeExportDropdown = () => {
+        if (!exportDropdown.classList.contains('hidden')) {
+            exportDropdown.classList.add('hidden');
+            exportBtn.setAttribute('aria-expanded', 'false');
+        }
+    };
+
+    exportBtn.addEventListener('click', toggleExportDropdown);
+    document.addEventListener('click', (e) => {
+        const isClickInside = exportBtn.contains(e.target) || exportDropdown.contains(e.target);
+        if (!isClickInside) {
+            closeExportDropdown();
+        }
+    });
+
+
     // --- Initial Load ---
     const initializeApp = async () => {
         appState.isDataLoaded = false;
@@ -847,7 +1387,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (appState.gistPat && appState.gistId) {
             const data = await getGistData();
             if (data) {
-                appState.events = data.events || [];
+                // Data migration for recurrence
+                appState.events = (data.events || []).map(event => {
+                    const migratedEvent = { ...event };
+                    if (typeof migratedEvent.recurring === 'string') {
+                        if (migratedEvent.recurring === 'none') {
+                            migratedEvent.recurring = null;
+                        } else {
+                            migratedEvent.recurring = { type: migratedEvent.recurring };
+                        }
+                    } else if (migratedEvent.recurring && migratedEvent.recurring.type === 'none') {
+                        migratedEvent.recurring = null;
+                    }
+                    return migratedEvent;
+                });
                 appState.tasks = data.tasks || [];
             } else {
                 // Handle case where credentials are saved but invalid
@@ -866,6 +1419,14 @@ document.addEventListener('DOMContentLoaded', () => {
         appState.isDataLoaded = true;
         render();
     };
+
+    // Apply initial theme and listen for OS changes
+    applyTheme(appState.theme);
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (appState.theme === 'system') {
+            applyTheme('system');
+        }
+    });
 
     initializeApp();
 });
