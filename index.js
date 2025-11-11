@@ -6,7 +6,7 @@ import { parseEventFromString } from './services/geminiService.js';
 document.addEventListener('DOMContentLoaded', () => {
     const appState = {
         currentDate: new Date(),
-        viewMode: 'month', // 'day', 'month', 'year'
+        viewMode: 'month', // 'day', 'week', 'month', 'year'
         events: [],
         tasks: [],
         selectedDate: new Date(),
@@ -156,6 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'month':
                     renderMonthView();
                     break;
+                case 'week':
+                    renderWeekView();
+                    break;
                 case 'day':
                     renderDayView();
                     break;
@@ -183,6 +186,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    const getWeekRange = (date) => {
+        const d = new Date(date);
+        const day = d.getDay(); // Sunday - 0, Saturday - 6
+        const diffStart = d.getDate() - day;
+        const startOfWeek = new Date(d.setDate(diffStart));
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        endOfWeek.setHours(23, 59, 59, 999);
+        return { start: startOfWeek, end: endOfWeek };
+    };
+
     const updateHeader = () => {
         switch (appState.viewMode) {
             case 'year':
@@ -191,6 +207,19 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'month':
                 headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
                 break;
+            case 'week': {
+                const { start, end } = getWeekRange(appState.currentDate);
+                const startMonth = start.toLocaleDateString('en-US', { month: 'short' });
+                const endMonth = end.toLocaleDateString('en-US', { month: 'short' });
+                if (startMonth === endMonth) {
+                    headerText.textContent = `${startMonth} ${start.getDate()} - ${end.getDate()}, ${start.getFullYear()}`;
+                } else if (start.getFullYear() !== end.getFullYear()) {
+                     headerText.textContent = `${startMonth} ${start.getDate()}, ${start.getFullYear()} - ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
+                } else {
+                    headerText.textContent = `${startMonth} ${start.getDate()} - ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
+                }
+                break;
+            }
             case 'day':
                 headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
                 break;
@@ -309,6 +338,124 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         html += `</div></div>`;
+        viewContainer.innerHTML = html;
+    };
+
+    const renderWeekView = () => {
+        const getDatesOfWeek = (date) => {
+            const { start } = getWeekRange(date);
+            return Array.from({ length: 7 }, (_, i) => {
+                const d = new Date(start);
+                d.setDate(d.getDate() + i);
+                return d;
+            });
+        };
+
+        const weekDates = getDatesOfWeek(appState.currentDate);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const hours = Array.from({ length: 24 }, (_, i) => i);
+        const formatTime = (hour) => new Date(0,0,0,hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+
+        const allDayEvents = [];
+        const timedEvents = [];
+
+        weekDates.forEach((date) => {
+            getEventsForDate(date).forEach(event => {
+                // Add each event only once, based on its start date, to prevent duplication from multi-day rendering
+                if (new Date(event.start).toDateString() !== date.toDateString()) {
+                    return;
+                }
+                const start = new Date(event.start);
+                const end = new Date(event.end);
+                const isAllDay = (end.getTime() - start.getTime()) >= (23.5 * 60 * 60 * 1000);
+                
+                if (isAllDay) allDayEvents.push(event);
+                else timedEvents.push(event);
+            });
+        });
+
+        let allDayEventsHtml = allDayEvents.map(event => {
+            const start = new Date(event.start);
+            const dayIndex = weekDates.findIndex(d => d.toDateString() === start.toDateString());
+            if (dayIndex === -1) return '';
+            return `
+                <div class="col-start-${dayIndex + 1} px-2 py-0.5 my-0.5 rounded text-white text-xs" style="background-color: ${event.color};" data-event-id="${event.id}">
+                    ${event.title}
+                </div>`;
+        }).join('');
+        
+        let timedEventsHtml = timedEvents.map(event => {
+            const start = new Date(event.start);
+            const end = new Date(event.end);
+            const dayIndex = weekDates.findIndex(d => d.toDateString() === start.toDateString());
+            if (dayIndex === -1) return '';
+
+            const top = (start.getHours() * 60 + start.getMinutes()) / (24 * 60) * 100;
+            const duration = Math.max(15, (end.getTime() - start.getTime()) / (1000 * 60)); // Min 15min duration
+            const height = (duration / (24 * 60)) * 100;
+            
+            return `
+                <div class="week-event absolute p-1.5 text-white rounded-lg shadow-md cursor-pointer overflow-hidden" 
+                     style="--day-index: ${dayIndex}; top: ${top}%; height: ${height}%; background-color: ${event.color};"
+                     data-event-id="${event.id}">
+                    <p class="font-bold text-xs truncate">${event.title}</p>
+                    <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                </div>
+            `;
+        }).join('');
+
+        let html = `
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg h-full flex flex-col">
+                <!-- Header row for days -->
+                <div class="flex border-b border-gray-200 dark:border-gray-700">
+                    <div class="w-14 shrink-0"></div> <!-- Spacer for time column -->
+                    ${weekDates.map(date => {
+                        const isToday = date.toDateString() === today.toDateString();
+                        return `<div class="flex-1 text-center py-2 border-l border-gray-200 dark:border-gray-700">
+                            <div class="text-xs uppercase text-gray-500">${date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                            <div class="text-2xl font-semibold ${isToday ? 'bg-blue-600 text-white rounded-full h-10 w-10 flex items-center justify-center mx-auto' : 'h-10 w-10 flex items-center justify-center mx-auto'}">${date.getDate()}</div>
+                        </div>`;
+                    }).join('')}
+                </div>
+
+                <!-- All Day events section -->
+                <div class="border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex">
+                        <div class="w-14 shrink-0 text-xs text-center py-1 text-gray-500 flex items-center justify-center">All Day</div>
+                        <div id="all-day-container" class="flex-1 grid grid-cols-7 relative border-l border-gray-200 dark:border-gray-700">
+                           ${allDayEventsHtml}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main timeline -->
+                <div class="flex-1 overflow-auto relative">
+                    <div class="flex h-full" style="min-height: ${24 * 4}rem;">
+                        <!-- Time column -->
+                        <div class="w-14 shrink-0 pr-2 text-right text-xs text-gray-500 dark:text-gray-400">
+                            ${hours.map(hour => `<div class="h-16 flex items-start justify-end -translate-y-2">${hour > 0 ? formatTime(hour) : ''}</div>`).join('')}
+                        </div>
+
+                        <!-- Day columns container -->
+                        <div id="week-view-timeline" class="flex-1 grid grid-cols-7 relative">
+                            <!-- Vertical grid lines -->
+                            ${[...Array(7)].map((_, i) => `<div class="h-full ${i > 0 ? 'border-l' : ''} border-gray-200 dark:border-gray-700"></div>`).join('')}
+                            
+                            <!-- Horizontal grid lines -->
+                            <div class="absolute inset-0 pointer-events-none">
+                                ${hours.map(hour => `<div class="h-16 border-b border-gray-200 dark:border-gray-700"></div>`).join('')}
+                            </div>
+                            
+                            <!-- Events container -->
+                            <div class="absolute inset-0">
+                                ${timedEventsHtml}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
         viewContainer.innerHTML = html;
     };
 
@@ -654,8 +801,11 @@ document.addEventListener('DOMContentLoaded', () => {
             deleteEventBtn.classList.remove('hidden');
         } else {
             modalTitle.textContent = 'Add Event';
-            startTimeInput.value = '09:00';
-            endTimeInput.value = '10:00';
+            const roundedMinutes = Math.ceil(date.getMinutes() / 15) * 15;
+            date.setMinutes(roundedMinutes);
+            startTimeInput.value = date.toTimeString().substring(0, 5);
+            date.setHours(date.getHours() + 1);
+            endTimeInput.value = date.toTimeString().substring(0, 5);
             eventRecurringInput.value = 'none';
             selectedColor = colors[0];
             deleteEventBtn.classList.add('hidden');
@@ -716,6 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
         switch (appState.viewMode) {
             case 'year': date.setFullYear(date.getFullYear() - 1); break;
             case 'month': date.setMonth(date.getMonth() - 1); break;
+            case 'week': date.setDate(date.getDate() - 7); break;
             case 'day': date.setDate(date.getDate() - 1); break;
         }
         render();
@@ -726,6 +877,7 @@ document.addEventListener('DOMContentLoaded', () => {
         switch (appState.viewMode) {
             case 'year': date.setFullYear(date.getFullYear() + 1); break;
             case 'month': date.setMonth(date.getMonth() + 1); break;
+            case 'week': date.setDate(date.getDate() + 7); break;
             case 'day': date.setDate(date.getDate() + 1); break;
         }
         render();
@@ -755,16 +907,44 @@ document.addEventListener('DOMContentLoaded', () => {
             appState.currentDate = new Date(dayCell.dataset.date);
             appState.viewMode = 'day';
             render();
+            return;
+        }
+        
+        if (appState.viewMode === 'week') {
+            const timeline = e.target.closest('#week-view-timeline');
+            if (timeline && !e.target.closest('[data-event-id]')) {
+                 const getDatesOfWeek = (date) => {
+                    const { start } = getWeekRange(date);
+                    return Array.from({ length: 7 }, (_, i) => {
+                        const d = new Date(start);
+                        d.setDate(d.getDate() + i);
+                        return d;
+                    });
+                };
+                const weekDates = getDatesOfWeek(appState.currentDate);
+                const rect = timeline.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const dayIndex = Math.floor(x / (rect.width / 7));
+                const minutes = (y / rect.height) * 24 * 60;
+                
+                const clickedDate = new Date(weekDates[dayIndex]);
+                clickedDate.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+                
+                openEventModal(clickedDate);
+                return;
+            }
         }
 
         if (e.target.closest('.add-event-btn')) {
             const date = new Date(e.target.closest('.day-cell').dataset.date);
             openEventModal(date);
+            return;
         }
         
-        const dayEvent = e.target.closest('.day-event .event-content, .month-event');
-        if (dayEvent) {
-             const eventId = dayEvent.closest('[data-event-id]').dataset.eventId;
+        const eventEl = e.target.closest('[data-event-id]');
+        if (eventEl) {
+             const eventId = eventEl.dataset.eventId;
              const event = appState.events.find(e => e.id === eventId);
              if(event) {
                 openEventModal(new Date(event.start), eventId);

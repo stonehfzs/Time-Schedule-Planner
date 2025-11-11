@@ -40,7 +40,7 @@
             from { opacity: 0; }
             to { opacity: 1; }
         }
-        .day-event {
+        .day-event, .week-event {
             transition: all 0.2s ease-in-out;
         }
         #task-sidebar.hidden {
@@ -116,6 +116,12 @@
         .view-transition-in {
           animation: view-in 0.2s ease-in forwards;
         }
+        
+        /* Week View Specific Styles */
+        .week-event {
+            left: calc(var(--day-index) * (100% / 7));
+            width: calc(100% / 7);
+        }
 
     </style>
 <script type="importmap">
@@ -167,6 +173,7 @@
             <div class="flex items-center space-x-4">
                 <div id="view-switcher" class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 p-1 rounded-lg">
                     <button data-view="day" class="px-3 py-1.5 text-sm font-medium rounded-md">Day</button>
+                    <button data-view="week" class="px-3 py-1.5 text-sm font-medium rounded-md">Week</button>
                     <button data-view="month" class="px-3 py-1.5 text-sm font-medium rounded-md">Month</button>
                     <button data-view="year" class="px-3 py-1.5 text-sm font-medium rounded-md">Year</button>
                 </div>
