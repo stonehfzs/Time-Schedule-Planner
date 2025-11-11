@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const eventOrganizationInput = document.getElementById('event-organization');
     const startTimeInput = document.getElementById('start-time');
     const endTimeInput = document.getElementById('end-time');
+    const eventLinkedTaskInput = document.getElementById('event-linked-task');
     const eventRecurringInput = document.getElementById('event-recurring');
     const recurrenceDetails = document.getElementById('recurrence-details');
     const customRecurrenceSettings = document.getElementById('custom-recurrence-settings');
@@ -188,9 +189,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getWeekRange = (date) => {
         const d = new Date(date);
-        const day = d.getDay(); // Sunday - 0, Saturday - 6
-        const diffStart = d.getDate() - day;
-        const startOfWeek = new Date(d.setDate(diffStart));
+        const day = d.getDay(); // Sunday - 0, Monday - 1, ...
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is Sunday
+        const startOfWeek = new Date(d.setDate(diff));
         startOfWeek.setHours(0, 0, 0, 0);
 
         const endOfWeek = new Date(startOfWeek);
@@ -285,8 +286,9 @@ document.addEventListener('DOMContentLoaded', () => {
         today.setHours(0,0,0,0);
 
         const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const firstDayOfMonth = new Date(year, month, 1).getDay();
-        const weekDayNames = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, i + 1).toLocaleString('en-US', { weekday: 'short' }));
+        let firstDayOfMonth = new Date(year, month, 1).getDay(); // Sunday is 0, Monday is 1
+        firstDayOfMonth = (firstDayOfMonth === 0) ? 6 : firstDayOfMonth - 1; // Monday is 0, Sunday is 6
+        const weekDayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
         let html = `
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden h-full flex flex-col">
@@ -329,7 +331,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     <time datetime="${currentDate.toISOString()}" class="text-sm font-medium ${isTodayClass}">${day}</time>
                     ${taskIndicatorHtml}
                     <div class="mt-1 space-y-1 overflow-y-auto max-h-24">
-                        ${dayEvents.slice(0, 2).map(event => `<div class="month-event text-xs px-1.5 py-0.5 rounded text-white cursor-move" draggable="true" data-event-id="${event.id}" style="background-color: ${event.color};">${event.title}</div>`).join('')}
+                        ${dayEvents.slice(0, 2).map(event => {
+                            const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
+                            return `<div class="month-event flex items-center gap-1 text-xs px-1.5 py-0.5 rounded text-white cursor-move" draggable="true" data-event-id="${event.id}" style="background-color: ${event.color};" title="${linkedTask ? `Linked Task: ${linkedTask.title}` : ''}">
+                                ${linkedTask ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>` : ''}
+                                <span class="truncate">${event.title}</span>
+                            </div>`;
+                        }).join('')}
                         ${dayEvents.length > 2 ? `<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">+ ${dayEvents.length - 2} more</div>` : ''}
                     </div>
                     <button class="add-event-btn absolute bottom-2 right-2 h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">+</button>
@@ -395,17 +403,27 @@ document.addEventListener('DOMContentLoaded', () => {
             const { event, dayIndex } = occ;
             const start = new Date(event.start);
             const end = new Date(event.end);
+            const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
             
             const top = (start.getHours() * 60 + start.getMinutes()) / (24 * 60) * 100;
             const duration = Math.max(15, (end.getTime() - start.getTime()) / (1000 * 60)); // Min 15min duration
             const height = (duration / (24 * 60)) * 100;
             
             return `
-                <div class="week-event absolute p-1.5 text-white rounded-lg shadow-md cursor-pointer overflow-hidden" 
+                <div class="week-event absolute p-1.5 text-white rounded-lg shadow-md cursor-pointer overflow-hidden flex flex-col justify-start" 
                      style="--day-index: ${dayIndex}; top: ${top}%; height: ${height}%; background-color: ${event.color};"
                      data-event-id="${event.id}">
-                    <p class="font-bold text-xs truncate">${event.title}</p>
-                    <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                    <div class="flex-shrink-0">
+                         <div class="flex items-start justify-between">
+                            <p class="font-bold text-xs truncate">${event.title}</p>
+                            ${linkedTask ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" title="Linked Task: ${linkedTask.title}"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>` : ''}
+                        </div>
+                        <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                    </div>
+                    <div class="text-xs opacity-80 mt-1 space-y-0.5 overflow-hidden flex-grow">
+                        ${event.location ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
+                        ${(event.guests && event.guests.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0110 14.07a5 5 0 01-1.5-1.4c-.046.327-.07.66-.07 1a7 7 0 001.07 3.84.5.5 0 00.86 0A7 7 0 0012.93 17zM10 12a4 4 0 100-8 4 4 0 000 8z" /></svg>${event.guests.length} ${event.guests.length > 1 ? 'guests' : 'guest'}</p>` : ''}
+                    </div>
                 </div>
             `;
         }).join('');
@@ -530,6 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const top = (start.getHours() * 60 + start.getMinutes()) / (24 * 60) * 100;
                                 const duration = (end.getTime() - start.getTime()) / (1000 * 60);
                                 const height = (duration / (24 * 60)) * 100;
+                                const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
                                 return `
                                     <div class="day-event absolute left-2 right-2 p-2 text-white rounded-lg shadow-md cursor-move" 
                                          style="top: ${top}%; height: ${Math.max(height, 2)}%; background-color: ${event.color};"
@@ -544,6 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                                 ${event.location ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
                                                 ${(event.guests && event.guests.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0110 14.07a5 5 0 01-1.5-1.4c-.046.327-.07.66-.07 1a7 7 0 001.07 3.84.5.5 0 00.86 0A7 7 0 0012.93 17zM10 12a4 4 0 100-8 4 4 0 000 8z" /></svg>${event.guests.length} ${event.guests.length > 1 ? 'guests' : 'guest'}</p>` : ''}
                                                 ${(event.attachments && event.attachments.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a3 3 0 00-3 3v4a3 3 0 006 0V7a1 1 0 112 0v4a5 5 0 01-10 0V7a5 5 0 0110 0v4a1 1 0 11-2 0V7a3 3 0 00-3-3z" clip-rule="evenodd" /></svg>${event.attachments.length} ${event.attachments.length > 1 ? 'attachments' : 'attachment'}</p>` : ''}
+                                                ${linkedTask ? `<p class="flex items-center truncate" title="Linked Task: ${linkedTask.title}"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>${linkedTask.title}</p>` : ''}
                                             </div>
                                         </div>
                                         <div class="resize-handle bottom" data-handle="bottom"></div>
@@ -774,6 +794,16 @@ document.addEventListener('DOMContentLoaded', () => {
         customRecurrenceSettings.classList.add('hidden');
         recurrenceDetails.classList.add('hidden');
 
+        // Populate linked task dropdown
+        eventLinkedTaskInput.innerHTML = '<option value="">None</option>';
+        const incompleteTasks = appState.tasks.filter(t => !t.completed);
+        incompleteTasks.forEach(task => {
+            const option = document.createElement('option');
+            option.value = task.id;
+            option.textContent = task.title;
+            eventLinkedTaskInput.appendChild(option);
+        });
+
         if (eventId) {
             const event = appState.events.find(e => e.id === eventId);
             modalTitle.textContent = 'Edit Event';
@@ -784,6 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
             eventOrganizationInput.value = event.organization || '';
             startTimeInput.value = new Date(event.start).toTimeString().substring(0, 5);
             endTimeInput.value = new Date(event.end).toTimeString().substring(0, 5);
+            eventLinkedTaskInput.value = event.taskId || '';
             
             const recurring = event.recurring;
             if (recurring) {
@@ -812,6 +843,7 @@ document.addEventListener('DOMContentLoaded', () => {
             startTimeInput.value = date.toTimeString().substring(0, 5);
             date.setHours(date.getHours() + 1);
             endTimeInput.value = date.toTimeString().substring(0, 5);
+            eventLinkedTaskInput.value = '';
             eventRecurringInput.value = 'none';
             selectedColor = colors[0];
             deleteEventBtn.classList.add('hidden');
@@ -1037,6 +1069,7 @@ document.addEventListener('DOMContentLoaded', () => {
             organization: eventOrganizationInput.value.trim(),
             guests: modalGuests,
             attachments: modalAttachments,
+            taskId: eventLinkedTaskInput.value || null,
         };
 
         if (appState.editingEventId) {
@@ -1522,6 +1555,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { key: 'recurring.interval', label: 'recurring_interval' },
             { key: 'recurring.unit', label: 'recurring_unit' },
             { key: 'recurring.endDate', label: 'recurring_endDate' },
+            { key: 'taskId', label: 'taskId' },
         ];
 
         const csvContent = convertToCsv(appState.events, headers);

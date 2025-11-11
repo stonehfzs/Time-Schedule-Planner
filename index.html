@@ -293,6 +293,13 @@
                                 <input type="time" id="end-time" value="10:00" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
                             </div>
                         </div>
+                         <div>
+                            <label for="event-linked-task" class="block text-sm font-medium">Link to Task</label>
+                            <select id="event-linked-task" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="">None</option>
+                                <!-- Tasks will be populated here by JS -->
+                            </select>
+                        </div>
                         <div>
                             <label for="event-guest-input" class="block text-sm font-medium">Guests</label>
                             <div class="flex mt-1">
