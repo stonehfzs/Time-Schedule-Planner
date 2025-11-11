@@ -58,9 +58,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const startTimeInput = document.getElementById('start-time');
     const endTimeInput = document.getElementById('end-time');
     const eventRecurringInput = document.getElementById('event-recurring');
+    const recurrenceDetails = document.getElementById('recurrence-details');
     const customRecurrenceSettings = document.getElementById('custom-recurrence-settings');
     const recurrenceIntervalInput = document.getElementById('recurrence-interval');
     const recurrenceUnitInput = document.getElementById('recurrence-unit');
+    const recurrenceEndDateInput = document.getElementById('recurrence-end-date');
     const colorPicker = document.getElementById('color-picker');
     const customColorInput = document.getElementById('custom-color-input');
     const modalError = document.getElementById('modal-error');
@@ -92,10 +94,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsSuccess = document.getElementById('settings-success');
     const settingsCancelBtn = document.getElementById('settings-cancel-btn');
 
-    // Export Dropdown Elements
+    // Data I/O Dropdown Elements
     const exportDropdown = document.getElementById('export-dropdown');
     const exportEventsBtn = document.getElementById('export-events-btn');
     const exportTasksBtn = document.getElementById('export-tasks-btn');
+    const importEventsBtn = document.getElementById('import-events-btn');
+    const importTasksBtn = document.getElementById('import-tasks-btn');
+    const importEventsInput = document.getElementById('import-events-input');
+    const importTasksInput = document.getElementById('import-tasks-input');
 
 
     // --- Theme Management ---
@@ -137,8 +143,9 @@ document.addEventListener('DOMContentLoaded', () => {
             viewContainer.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">Loading your schedule...</div>`;
             return;
         }
-        viewContainer.style.opacity = '0';
-        setTimeout(() => {
+
+        const renderNewContent = () => {
+            // Update content
             updateHeader();
             renderTasks();
             updateTaskSidebarVisibility();
@@ -153,8 +160,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderDayView();
                     break;
             }
-            viewContainer.style.opacity = '1';
-        }, 300);
+            
+            // Trigger fade-in animation
+            viewContainer.classList.remove('view-transition-out');
+            viewContainer.classList.add('view-transition-in');
+            
+            // Clean up animation class after it's done
+            viewContainer.addEventListener('animationend', () => {
+                viewContainer.classList.remove('view-transition-in');
+            }, { once: true });
+        };
+
+        const isInitialRender = viewContainer.innerHTML.trim() === '' || viewContainer.innerHTML.includes("Loading");
+        
+        if (isInitialRender) {
+            // If it's the first time rendering, just show the content without an "out" animation
+            renderNewContent();
+        } else {
+            // For subsequent renders, animate the old content out first
+            viewContainer.classList.add('view-transition-out');
+            viewContainer.addEventListener('animationend', renderNewContent, { once: true });
+        }
     };
 
     const updateHeader = () => {
@@ -166,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
                 break;
             case 'day':
-                headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                headerText.textContent = appState.currentDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
                 break;
         }
 
@@ -441,6 +467,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 return eventStart.toDateString() === dateString;
             }
             
+            if (recurring.endDate) {
+                const recurrenceEndDate = new Date(recurring.endDate + 'T00:00:00');
+                if (dateWithoutTime.getTime() > recurrenceEndDate.getTime()) {
+                    return false; // Current date is after the recurrence end date
+                }
+            }
+
             const dayOfWeek = dateWithoutTime.getDay();
             const dayOfMonth = dateWithoutTime.getDate();
             const month = dateWithoutTime.getMonth();
@@ -466,12 +499,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         case 'days': {
                             const diffTime = dateWithoutTime.getTime() - eventStart.getTime();
                             const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-                            return diffDays % interval === 0;
+                            return diffDays >= 0 && diffDays % interval === 0;
                         }
                         case 'weeks': {
                             if (eventStartDayOfWeek !== dayOfWeek) return false;
                             const diffTime = dateWithoutTime.getTime() - eventStart.getTime();
                             const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                            if (diffDays < 0) return false;
                             const diffWeeks = Math.floor(diffDays / 7);
                             return diffWeeks % interval === 0;
                         }
@@ -479,7 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
                              if (eventStartDayOfMonth !== dayOfMonth) return false;
                              const yearDiff = dateWithoutTime.getFullYear() - eventStart.getFullYear();
                              const monthDiff = yearDiff * 12 + dateWithoutTime.getMonth() - eventStart.getMonth();
-                             return monthDiff % interval === 0;
+                             return monthDiff >= 0 && monthDiff % interval === 0;
                         }
                         default:
                             return false;
@@ -585,6 +619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalAttachments = [];
         modalError.classList.add('hidden');
         customRecurrenceSettings.classList.add('hidden');
+        recurrenceDetails.classList.add('hidden');
 
         if (eventId) {
             const event = appState.events.find(e => e.id === eventId);
@@ -599,6 +634,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const recurring = event.recurring;
             if (recurring) {
+                recurrenceDetails.classList.remove('hidden');
+                recurrenceEndDateInput.value = recurring.endDate || '';
                 if (recurring.type === 'custom') {
                     eventRecurringInput.value = 'custom';
                     recurrenceIntervalInput.value = recurring.interval || 1;
@@ -755,7 +792,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     eventRecurringInput.addEventListener('change', () => {
-        if (eventRecurringInput.value === 'custom') {
+        const recurrenceType = eventRecurringInput.value;
+        if (recurrenceType === 'none') {
+            recurrenceDetails.classList.add('hidden');
+        } else {
+            recurrenceDetails.classList.remove('hidden');
+        }
+
+        if (recurrenceType === 'custom') {
             customRecurrenceSettings.classList.remove('hidden');
         } else {
             customRecurrenceSettings.classList.add('hidden');
@@ -782,14 +826,16 @@ document.addEventListener('DOMContentLoaded', () => {
         let recurring = null;
         const recurringType = eventRecurringInput.value;
         if (recurringType !== 'none') {
+            recurring = { type: recurringType };
+
             if (recurringType === 'custom') {
-                recurring = {
-                    type: 'custom',
-                    interval: parseInt(recurrenceIntervalInput.value, 10) || 1,
-                    unit: recurrenceUnitInput.value
-                };
-            } else {
-                recurring = { type: recurringType };
+                recurring.interval = parseInt(recurrenceIntervalInput.value, 10) || 1;
+                recurring.unit = recurrenceUnitInput.value;
+            }
+
+            const endDate = recurrenceEndDateInput.value;
+            if (endDate) {
+                recurring.endDate = endDate;
             }
         }
 
@@ -1133,7 +1179,7 @@ document.addEventListener('DOMContentLoaded', () => {
         appState.activeInteraction = null;
     });
 
-    // --- CSV Export Logic ---
+    // --- CSV Export/Import Logic ---
     const escapeCsvCell = (cell) => {
         if (cell === null || cell === undefined) {
             return '';
@@ -1170,6 +1216,105 @@ document.addEventListener('DOMContentLoaded', () => {
         URL.revokeObjectURL(url);
     };
 
+    const parseCsv = (csvString) => {
+        const lines = csvString.trim().split('\n');
+        const headers = lines[0].split(',').map(h => h.trim());
+        const data = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(','); // Simplified parsing, assumes no commas in values
+            const obj = {};
+            for (let j = 0; j < headers.length; j++) {
+                obj[headers[j]] = values[j] ? values[j].trim() : '';
+            }
+            data.push(obj);
+        }
+        return data;
+    };
+
+    const handleFileImport = (e, type) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const csvContent = event.target.result;
+                const parsedData = parseCsv(csvContent);
+                if (type === 'events') {
+                    processImportedEvents(parsedData);
+                } else if (type === 'tasks') {
+                    processImportedTasks(parsedData);
+                }
+                await syncData();
+                render();
+                alert(`Successfully imported ${parsedData.length} ${type}.`);
+            } catch (error) {
+                console.error(`Error importing ${type}:`, error);
+                alert(`Failed to import ${type}. Please check the file format.`);
+            } finally {
+                // Reset input value to allow importing the same file again
+                e.target.value = null;
+            }
+        };
+        reader.readAsText(file);
+    };
+    
+    const processImportedTasks = (tasks) => {
+        tasks.forEach(task => {
+            if (!task.id || !task.title) return; // Skip invalid rows
+            
+            const existingTaskIndex = appState.tasks.findIndex(t => t.id === task.id);
+            const formattedTask = {
+                ...task,
+                completed: task.completed === 'true',
+                dueDate: task.dueDate || null,
+            };
+
+            if (existingTaskIndex > -1) {
+                appState.tasks[existingTaskIndex] = { ...appState.tasks[existingTaskIndex], ...formattedTask };
+            } else {
+                appState.tasks.push(formattedTask);
+            }
+        });
+    };
+    
+    const processImportedEvents = (events) => {
+        events.forEach(event => {
+            if (!event.id || !event.title || !event.start || !event.end) return; // Skip invalid rows
+
+            let recurring = null;
+            if (event.recurring_type && event.recurring_type !== 'none') {
+                recurring = {
+                    type: event.recurring_type,
+                    interval: event.recurring_interval ? parseInt(event.recurring_interval, 10) : 1,
+                    unit: event.recurring_unit || 'days',
+                    endDate: event.recurring_endDate || undefined,
+                };
+                if (!recurring.endDate) delete recurring.endDate;
+            }
+
+            const formattedEvent = {
+                ...event,
+                guests: event.guests ? event.guests.split(',').map(g => g.trim()).filter(Boolean) : [],
+                attachments: event.attachments ? event.attachments.split(',').map(a => a.trim()).filter(Boolean) : [],
+                recurring: recurring,
+            };
+            
+            delete formattedEvent.recurring_type;
+            delete formattedEvent.recurring_interval;
+            delete formattedEvent.recurring_unit;
+            delete formattedEvent.recurring_endDate;
+            
+            const existingEventIndex = appState.events.findIndex(e => e.id === event.id);
+            if (existingEventIndex > -1) {
+                appState.events[existingEventIndex] = { ...appState.events[existingEventIndex], ...formattedEvent };
+            } else {
+                appState.events.push(formattedEvent);
+            }
+        });
+    };
+
     exportEventsBtn.addEventListener('click', () => {
         if (appState.events.length === 0) {
             alert("No events to export.");
@@ -1190,6 +1335,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { key: 'recurring.type', label: 'recurring_type' },
             { key: 'recurring.interval', label: 'recurring_interval' },
             { key: 'recurring.unit', label: 'recurring_unit' },
+            { key: 'recurring.endDate', label: 'recurring_endDate' },
         ];
 
         const csvContent = convertToCsv(appState.events, headers);
@@ -1213,6 +1359,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const csvContent = convertToCsv(appState.tasks, headers);
         downloadFile(csvContent, 'tasks.csv', 'text/csv;charset=utf-8;');
     });
+    
+    importEventsBtn.addEventListener('click', () => importEventsInput.click());
+    importTasksBtn.addEventListener('click', () => importTasksInput.click());
+    importEventsInput.addEventListener('change', (e) => handleFileImport(e, 'events'));
+    importTasksInput.addEventListener('change', (e) => handleFileImport(e, 'tasks'));
+
 
     // --- Quick Add Modal Logic ---
     const openQuickAddModal = () => {
