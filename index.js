@@ -353,44 +353,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const weekDates = getDatesOfWeek(appState.currentDate);
         const today = new Date();
-        today.setHours(0,0,0,0);
+        today.setHours(0, 0, 0, 0);
         const hours = Array.from({ length: 24 }, (_, i) => i);
-        const formatTime = (hour) => new Date(0,0,0,hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+        const formatTime = (hour) => new Date(0, 0, 0, hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
 
-        const allDayEvents = [];
-        const timedEvents = [];
+        const allDayOccurrences = [];
+        const timedOccurrences = [];
+        const processedEventInstances = new Set();
 
-        weekDates.forEach((date) => {
+        weekDates.forEach((date, dayIndex) => {
             getEventsForDate(date).forEach(event => {
-                // Add each event only once, based on its start date, to prevent duplication from multi-day rendering
-                if (new Date(event.start).toDateString() !== date.toDateString()) {
+                const instanceId = `${event.id}_${date.toISOString().split('T')[0]}`;
+                if (processedEventInstances.has(instanceId)) {
                     return;
                 }
+                processedEventInstances.add(instanceId);
+
                 const start = new Date(event.start);
                 const end = new Date(event.end);
                 const isAllDay = (end.getTime() - start.getTime()) >= (23.5 * 60 * 60 * 1000);
-                
-                if (isAllDay) allDayEvents.push(event);
-                else timedEvents.push(event);
+
+                const occurrence = { event, dayIndex, occurrenceDate: date };
+
+                if (isAllDay) {
+                    allDayOccurrences.push(occurrence);
+                } else {
+                    timedOccurrences.push(occurrence);
+                }
             });
         });
 
-        let allDayEventsHtml = allDayEvents.map(event => {
-            const start = new Date(event.start);
-            const dayIndex = weekDates.findIndex(d => d.toDateString() === start.toDateString());
-            if (dayIndex === -1) return '';
+        let allDayEventsHtml = allDayOccurrences.map(occ => {
+            const { event, dayIndex } = occ;
             return `
                 <div class="col-start-${dayIndex + 1} px-2 py-0.5 my-0.5 rounded text-white text-xs" style="background-color: ${event.color};" data-event-id="${event.id}">
                     ${event.title}
                 </div>`;
         }).join('');
         
-        let timedEventsHtml = timedEvents.map(event => {
+        let timedEventsHtml = timedOccurrences.map(occ => {
+            const { event, dayIndex } = occ;
             const start = new Date(event.start);
             const end = new Date(event.end);
-            const dayIndex = weekDates.findIndex(d => d.toDateString() === start.toDateString());
-            if (dayIndex === -1) return '';
-
+            
             const top = (start.getHours() * 60 + start.getMinutes()) / (24 * 60) * 100;
             const duration = Math.max(15, (end.getTime() - start.getTime()) / (1000 * 60)); // Min 15min duration
             const height = (duration / (24 * 60)) * 100;
@@ -404,6 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
         }).join('');
+
 
         let html = `
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg h-full flex flex-col">
