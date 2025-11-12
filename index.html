@@ -123,6 +123,27 @@
             width: calc(100% / 7);
         }
 
+        /* Custom Color Input Styling */
+        input[type="color"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background-color: transparent;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+        input[type="color"]::-webkit-color-swatch {
+            border: 1px solid #9ca3af; /* gray-400 */
+            border-radius: 50%;
+        }
+        html.dark input[type="color"]::-webkit-color-swatch {
+            border-color: #4b5563; /* gray-600 */
+        }
+
     </style>
 <script type="importmap">
 {
@@ -293,6 +314,9 @@
                                 <input type="time" id="end-time" value="10:00" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
                             </div>
                         </div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 text-right -mt-2">
+                            Times are in <span id="modal-timezone-display" class="font-medium"></span>
+                        </div>
                          <div>
                             <label for="event-linked-task" class="block text-sm font-medium">Link to Task</label>
                             <select id="event-linked-task" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -364,7 +388,8 @@
                                         </div>
                                         <div class="flex space-x-2 pt-3 border-t border-gray-200 dark:border-gray-600">
                                             <input type="text" id="new-tag-name-input" placeholder="New tag name" class="block w-full px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500">
-                                            <button type="button" id="add-new-tag-btn" class="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm whitespace-nowrap">Add</button>
+                                            <input type="color" id="new-tag-color-input" value="#3b82f6" class="h-8 w-8 rounded-full">
+                                            <button type="button" id="add-new-tag-btn" class="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm whitespace-nowrap flex-shrink-0">Add</button>
                                         </div>
                                     </div>
                                 </details>
@@ -421,36 +446,47 @@
                 <form id="settings-form">
                     <h2 class="text-2xl font-bold mb-4">Settings</h2>
                     
-                    <!-- Theme Section -->
-                    <div class="mb-6">
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Theme</label>
-                        <div id="theme-switcher" class="grid grid-cols-3 gap-2 rounded-lg bg-gray-200 dark:bg-gray-700 p-1">
-                            <button type="button" data-theme="light" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">Light</button>
-                            <button type="button" data-theme="dark" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">Dark</button>
-                            <button type="button" data-theme="system" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">System</button>
-                        </div>
-                    </div>
-
-                    <div class="border-t border-gray-200 dark:border-gray-700 my-6"></div>
-
-                    <h3 class="text-lg font-semibold mb-2">Sync Settings</h3>
-                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                        To sync your data across devices, please provide a GitHub Personal Access Token (PAT) and the ID of a secret Gist.
-                    </p>
-                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                        <a href="https://github.com/settings/tokens/new?scopes=gist&description=ScheduleAppToken" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">Click here to create the required Token</a>, then create a <a href="https://gist.github.com/" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">secret Gist</a>.
-                    </div>
-                    <div class="space-y-4">
+                    <div class="space-y-6">
+                        <!-- Theme Section -->
                         <div>
-                            <label for="gist-pat" class="block text-sm font-medium">GitHub PAT</label>
-                            <input type="password" id="gist-pat" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Theme</label>
+                            <div id="theme-switcher" class="grid grid-cols-3 gap-2 rounded-lg bg-gray-200 dark:bg-gray-700 p-1">
+                                <button type="button" data-theme="light" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">Light</button>
+                                <button type="button" data-theme="dark" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">Dark</button>
+                                <button type="button" data-theme="system" class="theme-btn px-3 py-2 text-sm font-medium rounded-md transition-colors">System</button>
+                            </div>
                         </div>
+
+                        <!-- Timezone Section -->
+                         <div>
+                            <label for="timezone-select" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Zone</label>
+                            <select id="timezone-select" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></select>
+                        </div>
+
+                        <div class="border-t border-gray-200 dark:border-gray-700"></div>
+
+                        <!-- Sync Section -->
                         <div>
-                            <label for="gist-id" class="block text-sm font-medium">Gist ID</label>
-                            <input type="text" id="gist-id" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                            <h3 class="text-lg font-semibold mb-2">Sync Settings</h3>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                To sync your data across devices, please provide a GitHub Personal Access Token (PAT) and the ID of a secret Gist.
+                            </p>
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                                <a href="https://github.com/settings/tokens/new?scopes=gist&description=ScheduleAppToken" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">Click here to create the required Token</a>, then create a <a href="https://gist.github.com/" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">secret Gist</a>.
+                            </div>
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="gist-pat" class="block text-sm font-medium">GitHub PAT</label>
+                                    <input type="password" id="gist-pat" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                                </div>
+                                <div>
+                                    <label for="gist-id" class="block text-sm font-medium">Gist ID</label>
+                                    <input type="text" id="gist-id" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                                </div>
+                                <p id="settings-error" class="text-red-500 text-sm hidden"></p>
+                                <p id="settings-success" class="text-green-500 text-sm hidden"></p>
+                            </div>
                         </div>
-                        <p id="settings-error" class="text-red-500 text-sm hidden"></p>
-                        <p id="settings-success" class="text-green-500 text-sm hidden"></p>
                     </div>
                     
                     <div class="mt-6 flex justify-end space-x-2">

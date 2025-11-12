@@ -1,6 +1,4 @@
 
-
-
 import { getGistData, saveGistData, verifyGistCredentials } from './services/gistService.js';
 import { parseEventFromString } from './services/geminiService.js';
 
@@ -17,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
         gistPat: localStorage.getItem('gistPat'),
         gistId: localStorage.getItem('gistId'),
         theme: localStorage.getItem('theme') || 'system',
+        timeZone: localStorage.getItem('timeZone') || Intl.DateTimeFormat().resolvedOptions().timeZone,
         isDataLoaded: false,
         searchQuery: '',
         activeInteraction: null, // For custom drag/resize in day view
@@ -58,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const eventOrganizationInput = document.getElementById('event-organization');
     const startTimeInput = document.getElementById('start-time');
     const endTimeInput = document.getElementById('end-time');
+    const modalTimezoneDisplay = document.getElementById('modal-timezone-display');
     const eventLinkedTaskInput = document.getElementById('event-linked-task');
     const eventRecurringInput = document.getElementById('event-recurring');
     const recurrenceDetails = document.getElementById('recurrence-details');
@@ -81,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const eventTagColorSwatch = document.getElementById('event-tag-color-swatch');
     const tagManagementList = document.getElementById('tag-management-list');
     const newTagNameInput = document.getElementById('new-tag-name-input');
+    const newTagColorInput = document.getElementById('new-tag-color-input');
     const addNewTagBtn = document.getElementById('add-new-tag-btn');
 
     // Quick Add Modal Elements
@@ -95,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsModal = document.getElementById('settings-modal');
     const settingsForm = document.getElementById('settings-form');
     const themeSwitcher = document.getElementById('theme-switcher');
+    const timezoneSelect = document.getElementById('timezone-select');
     const gistPatInput = document.getElementById('gist-pat');
     const gistIdInput = document.getElementById('gist-id');
     const settingsError = document.getElementById('settings-error');
@@ -109,6 +111,69 @@ document.addEventListener('DOMContentLoaded', () => {
     const importTasksBtn = document.getElementById('import-tasks-btn');
     const importEventsInput = document.getElementById('import-events-input');
     const importTasksInput = document.getElementById('import-tasks-input');
+
+    // --- Time Zone & Date Helpers ---
+    const formatDateInTimeZone = (date, timeZone, options) => {
+        if (!date) return '';
+        const d = (date instanceof Date) ? date : new Date(date);
+        return new Intl.DateTimeFormat('en-US', { ...options, timeZone }).format(d);
+    };
+
+    const getPartsInTimeZone = (date, timeZone) => {
+        const d = (date instanceof Date) ? date : new Date(date);
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+        });
+        const formatted = formatter.format(d);
+        // Handle cases like "24:00" which Intl can produce
+        const [hourStr, minuteStr] = formatted.split(':');
+        const hour = hourStr === '24' ? 0 : parseInt(hourStr, 10);
+        const minute = parseInt(minuteStr, 10);
+        return { hour, minute };
+    };
+
+    const convertToUtc = (baseDate, timeString, timeZone) => {
+        const year = baseDate.getFullYear();
+        const month = baseDate.getMonth();
+        const day = baseDate.getDate();
+        const [hour, minute] = timeString.split(':').map(Number);
+    
+        // 1. Create a UTC date with the desired date/time components. This is our initial "guess".
+        const utcDate = new Date(Date.UTC(year, month, day, hour, minute));
+    
+        // 2. Format this UTC date into the target timezone to see what its local time components are.
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+        });
+        const parts = formatter.formatToParts(utcDate);
+        const findPart = (type) => parts.find(p => p.type === type)?.value || '0';
+    
+        const tzYear = parseInt(findPart('year'));
+        const tzMonth = parseInt(findPart('month')) - 1;
+        const tzDay = parseInt(findPart('day'));
+        const tzHour = parseInt(findPart('hour')) % 24;
+        const tzMinute = parseInt(findPart('minute'));
+
+        // 3. Create a new UTC date from these timezone-specific components.
+        const guessedTzDate = new Date(Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMinute));
+    
+        // 4. The difference between our initial guess and the timezone-specific date is the offset.
+        const offset = utcDate.getTime() - guessedTzDate.getTime();
+    
+        // 5. Apply the offset to our initial guess to get the correct final UTC date.
+        return new Date(utcDate.getTime() - offset);
+    };
+
+    const getStartOfDayInZone = (date, timeZone) => {
+        return convertToUtc(date, '00:00', timeZone);
+    };
+
+    const getYmdInZone = (date, timeZone) => {
+        const d = (date instanceof Date) ? date : new Date(date);
+        const formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+        return formatter.format(d);
+    };
 
 
     // --- Theme Management ---
@@ -288,8 +353,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const date = appState.currentDate;
         const year = date.getFullYear();
         const month = date.getMonth();
-        const today = new Date();
-        today.setHours(0,0,0,0);
+        
+        const todayYmd = getYmdInZone(new Date(), appState.timeZone);
 
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         let firstDayOfMonth = new Date(year, month, 1).getDay(); // Sunday is 0, Monday is 1
@@ -310,41 +375,44 @@ document.addEventListener('DOMContentLoaded', () => {
         
         for (let day = 1; day <= daysInMonth; day++) {
             const currentDate = new Date(year, month, day);
-            currentDate.setHours(0,0,0,0);
-            const isTodayClass = currentDate.getTime() === today.getTime() ? 'bg-blue-600 text-white rounded-full h-7 w-7 flex items-center justify-center' : '';
+            const currentYmd = getYmdInZone(currentDate, appState.timeZone);
+            const isTodayClass = currentYmd === todayYmd ? 'bg-blue-600 text-white rounded-full h-7 w-7 flex items-center justify-center' : '';
+            
             const dayEvents = getEventsForDate(currentDate);
             const dayTasks = getTasksForDate(currentDate);
-            
-            const incompleteTasks = dayTasks.filter(t => !t.completed);
-            let taskIndicatorHtml = '';
-            if (incompleteTasks.length > 0) {
-                const isOverdue = currentDate < today;
-                const isDueToday = currentDate.getTime() === today.getTime();
-                let indicatorClass = 'bg-green-500'; // Upcoming
-                let title = `${incompleteTasks.length} upcoming task(s)`;
-                if (isOverdue) {
-                    indicatorClass = 'bg-red-500';
-                    title = `${incompleteTasks.length} overdue task(s)`;
-                } else if (isDueToday) {
-                    indicatorClass = 'bg-yellow-500';
-                    title = `${incompleteTasks.length} task(s) due today`;
-                }
-                taskIndicatorHtml = `<div class="absolute top-1 right-1 h-2 w-2 rounded-full ${indicatorClass}" title="${title}"></div>`;
-            }
+
+            const combinedItems = [
+                ...dayEvents.map(e => ({ type: 'event', ...e })),
+                ...dayTasks.map(t => ({ type: 'task', ...t }))
+            ];
+            combinedItems.sort((a,b) => {
+                if (a.type === 'task' && b.type === 'event') return -1;
+                if (a.type === 'event' && b.type === 'task') return 1;
+                if (a.type === 'event') return new Date(a.start) - new Date(b.start);
+                return 0;
+            });
 
             html += `
                 <div class="day-cell relative p-2 border-r border-b border-gray-200 dark:border-gray-700 flex flex-col group hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer" data-date="${currentDate.toISOString()}">
                     <time datetime="${currentDate.toISOString()}" class="text-sm font-medium ${isTodayClass}">${day}</time>
-                    ${taskIndicatorHtml}
                     <div class="mt-1 space-y-1 overflow-y-auto max-h-24">
-                        ${dayEvents.slice(0, 2).map(event => {
-                            const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
-                            return `<div class="month-event flex items-center gap-1 text-xs px-1.5 py-0.5 rounded text-white cursor-move" draggable="true" data-event-id="${event.id}" style="background-color: ${event.color};" title="${linkedTask ? `Linked Task: ${linkedTask.title}` : ''}">
-                                ${linkedTask ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>` : ''}
-                                <span class="truncate">${event.title}</span>
-                            </div>`;
+                        ${combinedItems.slice(0, 2).map(item => {
+                            if (item.type === 'event') {
+                                const event = item;
+                                const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
+                                return `<div class="month-event flex items-center gap-1 text-xs px-1.5 py-0.5 rounded text-white cursor-move" draggable="true" data-event-id="${event.id}" style="background-color: ${event.color};" title="${linkedTask ? `Linked Task: ${linkedTask.title}` : ''}">
+                                    ${linkedTask ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>` : ''}
+                                    <span class="truncate">${event.title}</span>
+                                </div>`;
+                            } else { // It's a task
+                                const task = item;
+                                return `<div class="month-task flex items-center gap-1 text-xs px-1.5 py-0.5 rounded cursor-pointer ${task.completed ? 'bg-green-100 dark:bg-green-900/50 text-gray-500 line-through' : 'bg-gray-200 dark:bg-gray-600'}" data-date="${currentDate.toISOString()}" title="Task: ${task.title}">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 flex-shrink-0 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                                    <span class="truncate">${task.title}</span>
+                                </div>`;
+                            }
                         }).join('')}
-                        ${dayEvents.length > 2 ? `<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">+ ${dayEvents.length - 2} more</div>` : ''}
+                        ${combinedItems.length > 2 ? `<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">+ ${combinedItems.length - 2} more</div>` : ''}
                     </div>
                     <button class="add-event-btn absolute bottom-2 right-2 h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">+</button>
                 </div>
@@ -366,13 +434,13 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const weekDates = getDatesOfWeek(appState.currentDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const todayYmd = getYmdInZone(new Date(), appState.timeZone);
         const hours = Array.from({ length: 24 }, (_, i) => i);
-        const formatTime = (hour) => new Date(0, 0, 0, hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+        const formatTimeForAxis = (hour) => new Date(0, 0, 0, hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
 
         const allDayOccurrences = [];
         const timedOccurrences = [];
+        const allDayTasks = [];
         const processedEventInstances = new Set();
 
         weekDates.forEach((date, dayIndex) => {
@@ -395,24 +463,40 @@ document.addEventListener('DOMContentLoaded', () => {
                     timedOccurrences.push(occurrence);
                 }
             });
+
+            getTasksForDate(date).forEach(task => {
+                allDayTasks.push({ task, dayIndex });
+            });
         });
 
         let allDayEventsHtml = allDayOccurrences.map(occ => {
             const { event, dayIndex } = occ;
             return `
-                <div class="col-start-${dayIndex + 1} px-2 py-0.5 my-0.5 rounded text-white text-xs" style="background-color: ${event.color};" data-event-id="${event.id}">
+                <div class="col-start-${dayIndex + 1} px-2 py-0.5 my-0.5 rounded text-white text-xs cursor-pointer" style="background-color: ${event.color};" data-event-id="${event.id}">
                     ${event.title}
                 </div>`;
         }).join('');
         
+        let allDayTasksHtml = allDayTasks.map(occ => {
+            const { task, dayIndex } = occ;
+            return `
+                <div class="week-task col-start-${dayIndex + 1} px-2 py-0.5 my-0.5 rounded text-xs cursor-pointer ${task.completed ? 'bg-green-100 dark:bg-green-900/50 text-gray-500 line-through' : 'bg-gray-200 dark:bg-gray-600'}" data-date="${weekDates[dayIndex].toISOString()}" title="Task: ${task.title}">
+                    <div class="flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 flex-shrink-0 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                        <span class="truncate">${task.title}</span>
+                    </div>
+                </div>`;
+        }).join('');
+
         let timedEventsHtml = timedOccurrences.map(occ => {
             const { event, dayIndex } = occ;
-            const start = new Date(event.start);
-            const end = new Date(event.end);
             const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
             
-            const top = (start.getHours() * 60 + start.getMinutes()) / (24 * 60) * 100;
-            const duration = Math.max(15, (end.getTime() - start.getTime()) / (1000 * 60)); // Min 15min duration
+            const startParts = getPartsInTimeZone(event.start, appState.timeZone);
+            const startTotalMinutes = startParts.hour * 60 + startParts.minute;
+            const top = (startTotalMinutes / (24 * 60)) * 100;
+
+            const duration = (new Date(event.end).getTime() - new Date(event.start).getTime()) / (1000 * 60); // Duration is timezone-independent
             const height = (duration / (24 * 60)) * 100;
             
             return `
@@ -424,7 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <p class="font-bold text-xs truncate">${event.title}</p>
                             ${linkedTask ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" title="Linked Task: ${linkedTask.title}"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>` : ''}
                         </div>
-                        <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                        <p class="text-xs opacity-90">${formatDateInTimeZone(event.start, appState.timeZone, {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
                     <div class="text-xs opacity-80 mt-1 space-y-0.5 overflow-hidden flex-grow">
                         ${event.location ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
@@ -441,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="flex border-b border-gray-200 dark:border-gray-700">
                     <div class="w-14 shrink-0"></div> <!-- Spacer for time column -->
                     ${weekDates.map(date => {
-                        const isToday = date.toDateString() === today.toDateString();
+                        const isToday = getYmdInZone(date, appState.timeZone) === todayYmd;
                         return `<div class="flex-1 text-center py-2 border-l border-gray-200 dark:border-gray-700">
                             <div class="text-xs uppercase text-gray-500">${date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                             <div class="text-2xl font-semibold ${isToday ? 'bg-blue-600 text-white rounded-full h-10 w-10 flex items-center justify-center mx-auto' : 'h-10 w-10 flex items-center justify-center mx-auto'}">${date.getDate()}</div>
@@ -455,6 +539,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="w-14 shrink-0 text-xs text-center py-1 text-gray-500 flex items-center justify-center">All Day</div>
                         <div id="all-day-container" class="flex-1 grid grid-cols-7 relative border-l border-gray-200 dark:border-gray-700">
                            ${allDayEventsHtml}
+                           ${allDayTasksHtml}
                         </div>
                     </div>
                 </div>
@@ -464,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="flex h-full" style="min-height: ${24 * 4}rem;">
                         <!-- Time column -->
                         <div class="w-14 shrink-0 pr-2 text-right text-xs text-gray-500 dark:text-gray-400">
-                            ${hours.map(hour => `<div class="h-16 flex items-start justify-end -translate-y-2">${hour > 0 ? formatTime(hour) : ''}</div>`).join('')}
+                            ${hours.map(hour => `<div class="h-16 flex items-start justify-end -translate-y-2">${hour > 0 ? formatTimeForAxis(hour) : ''}</div>`).join('')}
                         </div>
 
                         <!-- Day columns container -->
@@ -491,18 +576,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderDayView = () => {
         const date = appState.currentDate;
-        date.setHours(0,0,0,0);
-        const today = new Date();
-        today.setHours(0,0,0,0);
+        const todayYmd = getYmdInZone(new Date(), appState.timeZone);
+        const currentYmd = getYmdInZone(date, appState.timeZone);
 
         const hours = Array.from({ length: 24 }, (_, i) => i);
         const dayEvents = getEventsForDate(date);
         const dayTasks = getTasksForDate(date);
 
-        const isOverdue = date < today;
-        const isDueToday = date.getTime() === today.getTime();
-
-        const formatTime = (hour) => new Date(0,0,0,hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+        const isOverdue = currentYmd < todayYmd;
+        const isDueToday = currentYmd === todayYmd;
+        
+        const formatTimeForAxis = (hour) => new Date(0,0,0,hour).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
 
         const taskHtml = dayTasks.map(task => {
              let statusIndicator = '';
@@ -514,7 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             return `
-                <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm cursor-move" draggable="true" data-task-id="${task.id}">
                     <div class="flex items-center min-w-0">
                         <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
                         <div class="ml-3 flex items-center gap-2 min-w-0">
@@ -544,17 +628,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="flex-1 overflow-auto relative">
                     <div class="grid grid-cols-[auto,1fr] h-full" style="min-height: ${24 * 4}rem;">
                         <div class="pr-2 text-right text-xs text-gray-500 dark:text-gray-400">
-                            ${hours.map(hour => `<div class="h-16 flex items-start justify-end -translate-y-2">${hour > 0 ? formatTime(hour) : ''}</div>`).join('')}
+                            ${hours.map(hour => `<div class="h-16 flex items-start justify-end -translate-y-2">${hour > 0 ? formatTimeForAxis(hour) : ''}</div>`).join('')}
                         </div>
                         <div id="day-view-timeline" class="relative border-l border-gray-200 dark:border-gray-700">
                             ${hours.map(hour => `<div class="h-16 border-b border-gray-200 dark:border-gray-700"></div>`).join('')}
                             ${dayEvents.map(event => {
-                                const start = new Date(event.start);
-                                const end = new Date(event.end);
-                                const top = (start.getHours() * 60 + start.getMinutes()) / (24 * 60) * 100;
-                                const duration = (end.getTime() - start.getTime()) / (1000 * 60);
+                                const startParts = getPartsInTimeZone(event.start, appState.timeZone);
+                                const startTotalMinutes = startParts.hour * 60 + startParts.minute;
+                                const top = (startTotalMinutes / (24 * 60)) * 100;
+                                
+                                const duration = (new Date(event.end).getTime() - new Date(event.start).getTime()) / (1000 * 60);
                                 const height = (duration / (24 * 60)) * 100;
                                 const linkedTask = event.taskId ? appState.tasks.find(t => t.id === event.taskId) : null;
+                                
+                                const timeOpts = {hour: '2-digit', minute:'2-digit'};
                                 return `
                                     <div class="day-event absolute left-2 right-2 p-2 text-white rounded-lg shadow-md cursor-move" 
                                          style="top: ${top}%; height: ${Math.max(height, 2)}%; background-color: ${event.color};"
@@ -563,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                         <div class="event-content h-full overflow-hidden flex flex-col justify-start">
                                             <div class="flex-shrink-0">
                                                 <p class="font-bold text-sm truncate">${event.title}</p>
-                                                <p class="text-xs opacity-90">${start.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}</p>
+                                                <p class="text-xs opacity-90">${formatDateInTimeZone(event.start, appState.timeZone, timeOpts)} - ${formatDateInTimeZone(event.end, appState.timeZone, timeOpts)}</p>
                                             </div>
                                             <div class="text-xs opacity-80 mt-1 space-y-0.5 overflow-hidden flex-grow">
                                                 ${event.location ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
@@ -618,11 +705,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getEventsForDate = (date) => {
         const query = appState.searchQuery ? appState.searchQuery.toLowerCase().trim() : null;
-
-        const dateWithoutTime = new Date(date);
-        dateWithoutTime.setHours(0, 0, 0, 0);
-        const dateString = dateWithoutTime.toDateString();
-
+        const { timeZone } = appState;
+    
+        const getPartsForRecurrence = (d, tz) => {
+            const formatter = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz,
+                weekday: 'short',
+                day: 'numeric',
+                month: 'numeric',
+            });
+            const parts = formatter.formatToParts(d);
+            const find = (type) => parts.find(p => p.type === type).value;
+            const weekdayMap = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
+            return {
+                dayOfWeek: weekdayMap[find('weekday')],
+                dayOfMonth: parseInt(find('day')),
+                month: parseInt(find('month')) - 1,
+            };
+        };
+    
+        const dateYmd = getYmdInZone(date, timeZone);
+        const checkDateParts = getPartsForRecurrence(date, timeZone);
+        const startOfCheckDate = getStartOfDayInZone(date, timeZone);
+    
         return appState.events.filter(event => {
             if (query) {
                 const titleMatch = event.title && event.title.toLowerCase().includes(query);
@@ -632,74 +737,61 @@ document.addEventListener('DOMContentLoaded', () => {
                     return false;
                 }
             }
-
-            const eventStart = new Date(event.start);
-            eventStart.setHours(0, 0, 0, 0);
-
-            if (eventStart.getTime() > dateWithoutTime.getTime()) {
+    
+            const eventStartUTC = new Date(event.start);
+            const recurring = event.recurring;
+    
+            if (!recurring) {
+                return getYmdInZone(eventStartUTC, timeZone) === dateYmd;
+            }
+    
+            const startOfEventDate = getStartOfDayInZone(eventStartUTC, timeZone);
+            if (startOfCheckDate < startOfEventDate) {
                 return false;
             }
-
-            const recurring = event.recurring;
-
-            if (!recurring) { // Includes null and undefined
-                return eventStart.toDateString() === dateString;
-            }
-            
+    
             if (recurring.endDate) {
-                const recurrenceEndDate = new Date(recurring.endDate + 'T00:00:00');
-                if (dateWithoutTime.getTime() > recurrenceEndDate.getTime()) {
-                    return false; // Current date is after the recurrence end date
+                const recurrenceEndDate = getStartOfDayInZone(new Date(recurring.endDate + 'T00:00:00'), timeZone);
+                if (startOfCheckDate > recurrenceEndDate) {
+                    return false;
                 }
             }
-
-            const dayOfWeek = dateWithoutTime.getDay();
-            const dayOfMonth = dateWithoutTime.getDate();
-            const month = dateWithoutTime.getMonth();
-
-            const eventStartDayOfWeek = eventStart.getDay();
-            const eventStartDayOfMonth = eventStart.getDate();
-            const eventStartMonth = eventStart.getMonth();
-            
+    
+            const eventStartDateParts = getPartsForRecurrence(eventStartUTC, timeZone);
+    
             switch (recurring.type) {
-                case 'daily':
-                    return true;
-                case 'weekly':
-                    return eventStartDayOfWeek === dayOfWeek;
-                case 'monthly':
-                    return eventStartDayOfMonth === dayOfMonth;
-                case 'yearly':
-                    return eventStartDayOfMonth === dayOfMonth && eventStartMonth === month;
+                case 'daily': return true;
+                case 'weekly': return eventStartDateParts.dayOfWeek === checkDateParts.dayOfWeek;
+                case 'monthly': return eventStartDateParts.dayOfMonth === checkDateParts.dayOfMonth;
+                case 'yearly': return eventStartDateParts.dayOfMonth === checkDateParts.dayOfMonth && eventStartDateParts.month === checkDateParts.month;
                 case 'custom': {
                     const interval = parseInt(recurring.interval, 10) || 1;
                     if (interval <= 0) return false;
-
+    
+                    const diffTime = startOfCheckDate.getTime() - startOfEventDate.getTime();
+    
                     switch (recurring.unit) {
                         case 'days': {
-                            const diffTime = dateWithoutTime.getTime() - eventStart.getTime();
                             const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
                             return diffDays >= 0 && diffDays % interval === 0;
                         }
                         case 'weeks': {
-                            if (eventStartDayOfWeek !== dayOfWeek) return false;
-                            const diffTime = dateWithoutTime.getTime() - eventStart.getTime();
+                            if (eventStartDateParts.dayOfWeek !== checkDateParts.dayOfWeek) return false;
                             const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
                             if (diffDays < 0) return false;
                             const diffWeeks = Math.floor(diffDays / 7);
                             return diffWeeks % interval === 0;
                         }
                         case 'months': {
-                             if (eventStartDayOfMonth !== dayOfMonth) return false;
-                             const yearDiff = dateWithoutTime.getFullYear() - eventStart.getFullYear();
-                             const monthDiff = yearDiff * 12 + dateWithoutTime.getMonth() - eventStart.getMonth();
-                             return monthDiff >= 0 && monthDiff % interval === 0;
+                            if (eventStartDateParts.dayOfMonth !== checkDateParts.dayOfMonth) return false;
+                            const yearDiff = date.getFullYear() - eventStartUTC.getFullYear();
+                            const monthDiff = yearDiff * 12 + date.getMonth() - eventStartUTC.getMonth();
+                            return monthDiff >= 0 && monthDiff % interval === 0;
                         }
-                        default:
-                            return false;
+                        default: return false;
                     }
                 }
-                default:
-                    return false;
+                default: return false;
             }
         }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     };
@@ -741,7 +833,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             return `
-            <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+            <div class="task-item flex items-center justify-between p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm cursor-move" draggable="true" data-task-id="${task.id}">
                 <div class="flex items-center overflow-hidden">
                     <input type="checkbox" class="task-checkbox h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 flex-shrink-0" data-task-id="${task.id}" ${task.completed ? 'checked' : ''}>
                     <div class="ml-3 truncate">
@@ -799,6 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalError.classList.add('hidden');
         customRecurrenceSettings.classList.add('hidden');
         recurrenceDetails.classList.add('hidden');
+        modalTimezoneDisplay.textContent = appState.timeZone.replace(/_/g, ' ');
 
         // Populate linked task dropdown
         eventLinkedTaskInput.innerHTML = '<option value="">None</option>';
@@ -809,6 +902,8 @@ document.addEventListener('DOMContentLoaded', () => {
             option.textContent = task.title;
             eventLinkedTaskInput.appendChild(option);
         });
+        
+        const timeFormatOptions = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
 
         if (eventId) {
             const event = appState.events.find(e => e.id === eventId);
@@ -818,8 +913,8 @@ document.addEventListener('DOMContentLoaded', () => {
             eventDescriptionInput.value = event.description;
             eventLocationInput.value = event.location || '';
             eventOrganizationInput.value = event.organization || '';
-            startTimeInput.value = new Date(event.start).toTimeString().substring(0, 5);
-            endTimeInput.value = new Date(event.end).toTimeString().substring(0, 5);
+            startTimeInput.value = formatDateInTimeZone(event.start, appState.timeZone, timeFormatOptions);
+            endTimeInput.value = formatDateInTimeZone(event.end, appState.timeZone, timeFormatOptions);
             eventLinkedTaskInput.value = event.taskId || '';
             eventTagSelect.value = event.tagId || (appState.tags.length > 0 ? appState.tags[0].id : '');
             
@@ -844,11 +939,15 @@ document.addEventListener('DOMContentLoaded', () => {
             deleteEventBtn.classList.remove('hidden');
         } else {
             modalTitle.textContent = 'Add Event';
-            const roundedMinutes = Math.ceil(date.getMinutes() / 15) * 15;
-            date.setMinutes(roundedMinutes);
-            startTimeInput.value = date.toTimeString().substring(0, 5);
-            date.setHours(date.getHours() + 1);
-            endTimeInput.value = date.toTimeString().substring(0, 5);
+            const roundedMinutes = Math.ceil(new Date().getMinutes() / 15) * 15;
+            const startDate = new Date(date);
+            startDate.setHours(new Date().getHours(), roundedMinutes);
+
+            const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+            
+            startTimeInput.value = formatDateInTimeZone(startDate, appState.timeZone, timeFormatOptions);
+            endTimeInput.value = formatDateInTimeZone(endDate, appState.timeZone, timeFormatOptions);
+
             eventLinkedTaskInput.value = '';
             eventRecurringInput.value = 'none';
             eventTagSelect.value = appState.tags.length > 0 ? appState.tags[0].id : '';
@@ -896,11 +995,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const renderTagManager = () => {
         tagManagementList.innerHTML = appState.tags.map(tag => `
             <div class="flex items-center space-x-2" data-tag-id="${tag.id}">
-                <span class="h-5 w-5 rounded-full flex-shrink-0 border" style="background-color: ${tag.color};"></span>
+                <input type="color" value="${tag.color}" class="tag-color-input h-6 w-6" title="Change tag color">
                 <input type="text" value="${tag.name}" class="tag-name-input block w-full px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Tag name">
                 <button type="button" class="delete-tag-btn text-gray-400 hover:text-red-500 font-bold text-lg flex-shrink-0" aria-label="Delete tag">&times;</button>
             </div>
         `).join('');
+        // Set default color for new tag input
+        newTagColorInput.value = colors[appState.tags.length % colors.length];
     };
 
 
@@ -958,9 +1059,17 @@ document.addEventListener('DOMContentLoaded', () => {
             render();
             return;
         }
+        
+        const taskEl = e.target.closest('.month-task, .week-task');
+        if (taskEl) {
+            appState.currentDate = new Date(taskEl.dataset.date);
+            appState.viewMode = 'day';
+            render();
+            return;
+        }
 
         const dayCell = e.target.closest('.day-cell');
-        if (dayCell && !e.target.closest('[draggable="true"]')) { // Prevent changing view when clicking a draggable event
+        if (dayCell && !e.target.closest('[draggable="true"]') && !e.target.closest('.month-task')) { // Prevent changing view when clicking a draggable event or a task
             appState.currentDate = new Date(dayCell.dataset.date);
             appState.viewMode = 'day';
             render();
@@ -1033,14 +1142,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     eventForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
-        const startDateTime = new Date(appState.selectedDate);
-        const [startHour, startMinute] = startTimeInput.value.split(':').map(Number);
-        startDateTime.setHours(startHour, startMinute, 0, 0);
 
-        const endDateTime = new Date(appState.selectedDate);
-        const [endHour, endMinute] = endTimeInput.value.split(':').map(Number);
-        endDateTime.setHours(endHour, endMinute, 0, 0);
+        const startDateTime = convertToUtc(appState.selectedDate, startTimeInput.value, appState.timeZone);
+        const endDateTime = convertToUtc(appState.selectedDate, endTimeInput.value, appState.timeZone);
 
         if (endDateTime <= startDateTime) {
             modalError.textContent = 'End time must be after start time.';
@@ -1190,13 +1294,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const newTag = {
             id: `tag-${Date.now()}`,
             name: newName,
-            color: colors[appState.tags.length % colors.length]
+            color: newTagColorInput.value
         };
         appState.tags.push(newTag);
         newTagNameInput.value = '';
         
         populateTagSelect();
-        renderTagManager();
+        renderTagManager(); // This will also reset the new tag color input to the next default
         eventTagSelect.value = newTag.id; // Select the new tag
         updateTagColorSwatch();
         await syncData();
@@ -1216,6 +1320,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 tag.name = newName;
                 populateTagSelect(); // Update names in dropdown
                 await syncData();
+            }
+        }
+
+        if (e.target.classList.contains('tag-color-input')) {
+            const tagId = e.target.closest('[data-tag-id]').dataset.tagId;
+            const newColor = e.target.value;
+            const tag = appState.tags.find(t => t.id === tagId);
+            if (tag) {
+                tag.color = newColor;
+
+                appState.events.forEach(event => {
+                    if (event.tagId === tagId) {
+                        event.color = newColor;
+                    }
+                });
+                
+                updateTagColorSwatch();
+                await syncData();
+                render(); // Full re-render needed to update event colors in the calendar view
             }
         }
     });
@@ -1292,37 +1415,88 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Drag and Drop Logic ---
     let draggedElement = null;
+    const pixelsToMinutes = (pixels, timelineHeight) => (pixels / timelineHeight) * (24 * 60);
 
-    // Native D&D for Month View
-    viewContainer.addEventListener('dragstart', (e) => {
-        if (appState.viewMode !== 'month') {
-            e.preventDefault();
-            return;
-        }
-        const eventEl = e.target.closest('[data-event-id]');
-        if (eventEl) {
+    document.addEventListener('dragstart', e => {
+        const eventEl = e.target.closest('.month-event[draggable="true"]');
+        const taskItem = e.target.closest('.task-item[draggable="true"]');
+
+        if (appState.viewMode === 'month' && eventEl) {
             draggedElement = eventEl;
             e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', eventEl.dataset.eventId);
-            setTimeout(() => {
-                eventEl.classList.add('opacity-40');
-            }, 0);
+            e.dataTransfer.setData('application/json', JSON.stringify({ type: 'event', id: eventEl.dataset.eventId }));
+            setTimeout(() => eventEl.classList.add('opacity-40'), 0);
+        } else if (taskItem) {
+            const taskId = taskItem.dataset.taskId;
+            draggedElement = taskItem;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('application/json', JSON.stringify({ type: 'task', id: taskId }));
+            setTimeout(() => taskItem.classList.add('opacity-40'), 0);
         }
     });
 
-    viewContainer.addEventListener('dragend', () => {
+    document.addEventListener('dragend', () => {
         if (draggedElement) {
             draggedElement.classList.remove('opacity-40');
-            draggedElement = null;
         }
-        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700'));
+        draggedElement = null;
+        
+        const placeholder = document.getElementById('event-placeholder');
+        if (placeholder) {
+            placeholder.remove();
+        }
+        
+        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-blue-900', 'dark:bg-gray-700'));
     });
     
     let lastDragOverCell = null;
     viewContainer.addEventListener('dragover', (e) => {
-        e.preventDefault();
+        let dragData;
+        try {
+            if (e.dataTransfer.types.includes('application/json')) {
+                dragData = JSON.parse(e.dataTransfer.getData('application/json'));
+            }
+        } catch (err) { /* ignore */ }
 
-        if (appState.viewMode === 'month') {
+        const isTaskDrag = dragData && dragData.type === 'task';
+        const timeline = e.target.closest('#day-view-timeline, #week-view-timeline');
+
+        if (isTaskDrag && timeline) {
+            e.preventDefault();
+            let placeholder = document.getElementById('event-placeholder');
+            if (!placeholder) {
+                placeholder = document.createElement('div');
+                placeholder.id = 'event-placeholder';
+                timeline.appendChild(placeholder);
+            }
+            const timelineRect = timeline.getBoundingClientRect();
+            const y = e.clientY - timelineRect.top;
+            let minutes = pixelsToMinutes(y, timelineRect.height);
+            minutes = Math.round(minutes / 15) * 15;
+            
+            const top = (minutes / (24 * 60)) * 100;
+            const height = (60 / (24 * 60)) * 100; // 1-hour default duration
+
+            placeholder.style.top = `${top}%`;
+            placeholder.style.height = `${height}%`;
+            
+            if (appState.viewMode === 'week') {
+                const x = e.clientX - timelineRect.left;
+                const dayIndex = Math.floor(x / (timelineRect.width / 7));
+                placeholder.style.left = `calc(${dayIndex} * (100% / 7) + 0.25rem)`;
+                placeholder.style.width = `calc((100% / 7) - 0.5rem)`;
+                placeholder.style.right = 'auto';
+            } else {
+                 placeholder.style.left = '0.5rem';
+                 placeholder.style.right = '0.5rem';
+                 placeholder.style.width = 'auto';
+            }
+            return;
+        }
+
+        const isEventDrag = dragData && dragData.type === 'event';
+        if (isEventDrag && appState.viewMode === 'month') {
+            e.preventDefault();
             const dayCell = e.target.closest('.day-cell');
             if (dayCell && dayCell !== lastDragOverCell) {
                  if(lastDragOverCell) {
@@ -1340,6 +1514,11 @@ document.addEventListener('DOMContentLoaded', () => {
             dayCell.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
             lastDragOverCell = null;
         }
+        const timeline = e.target.closest('#day-view-timeline, #week-view-timeline');
+        if(timeline) {
+            const placeholder = document.getElementById('event-placeholder');
+            if (placeholder) placeholder.remove();
+        }
     });
 
     viewContainer.addEventListener('drop', async (e) => {
@@ -1348,27 +1527,92 @@ document.addEventListener('DOMContentLoaded', () => {
             lastDragOverCell.classList.remove('drag-over', 'bg-blue-100', 'dark:bg-gray-700');
             lastDragOverCell = null;
         }
+        
+        let dragData;
+        try {
+            dragData = JSON.parse(e.dataTransfer.getData('application/json'));
+        } catch (error) { return; }
 
-        const eventId = e.dataTransfer.getData('text/plain');
-        const event = appState.events.find(ev => ev.id === eventId);
-        if (!event) return;
+        if (!dragData) return;
+        
+        const timeline = e.target.closest('#day-view-timeline, #week-view-timeline');
+        if (dragData.type === 'task' && timeline) {
+            const taskId = dragData.id;
+            const task = appState.tasks.find(t => t.id === taskId);
+            if (!task) return;
 
-        if (appState.viewMode === 'month') {
+            const timelineRect = timeline.getBoundingClientRect();
+            const y = e.clientY - timelineRect.top;
+            let minutes = pixelsToMinutes(y, timelineRect.height);
+            minutes = Math.round(minutes / 15) * 15;
+            const timeString = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+            let dropDate;
+            if (appState.viewMode === 'day') {
+                dropDate = new Date(appState.currentDate);
+            } else { // week view
+                const weekDates = Array.from({ length: 7 }, (_, i) => {
+                    const d = new Date(getWeekRange(appState.currentDate).start);
+                    d.setDate(d.getDate() + i);
+                    return d;
+                });
+                const x = e.clientX - timelineRect.left;
+                const dayIndex = Math.floor(x / (timelineRect.width / 7));
+                dropDate = new Date(weekDates[dayIndex]);
+            }
+
+            const startDateTime = convertToUtc(dropDate, timeString, appState.timeZone);
+            const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hour duration
+            const defaultTag = appState.tags.length > 0 ? appState.tags[0] : { id: null, color: '#808080' };
+
+            const newEvent = {
+                id: Date.now().toString(),
+                title: task.title,
+                description: '',
+                start: startDateTime.toISOString(),
+                end: endDateTime.toISOString(),
+                color: defaultTag.color,
+                tagId: defaultTag.id,
+                taskId: task.id,
+                recurring: null,
+                location: '',
+                organization: '',
+                guests: [],
+                attachments: [],
+            };
+
+            appState.events.push(newEvent);
+            task.completed = true;
+
+            await syncData();
+            render();
+            
+            const placeholder = document.getElementById('event-placeholder');
+            if (placeholder) placeholder.remove();
+            return;
+        }
+
+        if (dragData.type === 'event' && appState.viewMode === 'month') {
+            const eventId = dragData.id;
+            const event = appState.events.find(ev => ev.id === eventId);
+            if (!event) return;
+
             const dayCell = e.target.closest('.day-cell');
             if (dayCell) {
-                const newDateStr = dayCell.dataset.date;
-                
-                const originalStart = new Date(event.start);
-                const originalEnd = new Date(event.end);
-                const duration = originalEnd.getTime() - originalStart.getTime();
+                const newDate = new Date(dayCell.dataset.date);
+                const originalStartUTC = new Date(event.start);
+                const originalEndUTC = new Date(event.end);
+                const duration = originalEndUTC.getTime() - originalStartUTC.getTime();
 
-                const newStartDate = new Date(newDateStr);
-                newStartDate.setHours(originalStart.getHours(), originalStart.getMinutes(), originalStart.getSeconds(), originalStart.getMilliseconds());
-                
-                const newEndDate = new Date(newStartDate.getTime() + duration);
+                // Get time parts of original event in the current timezone
+                const originalTimeParts = getPartsInTimeZone(originalStartUTC, appState.timeZone);
+                const timeString = `${String(originalTimeParts.hour).padStart(2, '0')}:${String(originalTimeParts.minute).padStart(2, '0')}`;
 
-                event.start = newStartDate.toISOString();
-                event.end = newEndDate.toISOString();
+                const newStartUTC = convertToUtc(newDate, timeString, appState.timeZone);
+                const newEndUTC = new Date(newStartUTC.getTime() + duration);
+
+                event.start = newStartUTC.toISOString();
+                event.end = newEndUTC.toISOString();
                 
                 await syncData();
                 render();
@@ -1377,8 +1621,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Custom Drag & Resize for Day View
-    const pixelsToMinutes = (pixels, timelineHeight) => (pixels / timelineHeight) * (24 * 60);
-
     viewContainer.addEventListener('mousedown', e => {
         if (appState.viewMode !== 'day' || e.button !== 0) return;
 
@@ -1451,7 +1693,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const top = ((newStart.getHours() * 60 + newStart.getMinutes()) / (24 * 60)) * 100;
+        const startParts = getPartsInTimeZone(newStart, appState.timeZone);
+        const startTotalMinutes = startParts.hour * 60 + startParts.minute;
+        const top = (startTotalMinutes / (24 * 60)) * 100;
+        
         const duration = (newEnd.getTime() - newStart.getTime()) / (1000 * 60);
         const height = (duration / (24 * 60)) * 100;
 
@@ -1744,15 +1989,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!parsedData.title || !parsedData.date || !parsedData.startTime || !parsedData.endTime) {
                 throw new Error("Couldn't extract all required event details.");
             }
-
-            const [startHour, startMinute] = parsedData.startTime.split(':').map(Number);
-            const [endHour, endMinute] = parsedData.endTime.split(':').map(Number);
-
-            const [year, month, day] = parsedData.date.split('-').map(Number);
-
-            const startDateTime = new Date(year, month - 1, day, startHour, startMinute);
-            const endDateTime = new Date(year, month - 1, day, endHour, endMinute);
             
+            const eventDate = new Date(parsedData.date + "T00:00:00"); // Use a neutral time
+            const startDateTime = convertToUtc(eventDate, parsedData.startTime, appState.timeZone);
+            const endDateTime = convertToUtc(eventDate, parsedData.endTime, appState.timeZone);
+
             if (endDateTime < startDateTime) {
                 endDateTime.setDate(endDateTime.getDate() + 1);
             }
@@ -1796,6 +2037,27 @@ document.addEventListener('DOMContentLoaded', () => {
         gistIdInput.value = appState.gistId || '';
         settingsError.classList.add('hidden');
         settingsSuccess.classList.add('hidden');
+        
+        if (timezoneSelect.options.length === 0) { // Populate only once
+            try {
+                const timezones = Intl.supportedValuesOf('timeZone');
+                timezones.forEach(tz => {
+                    const option = document.createElement('option');
+                    option.value = tz;
+                    option.textContent = tz.replace(/_/g, ' ');
+                    timezoneSelect.appendChild(option);
+                });
+            } catch (e) {
+                // Fallback for older browsers
+                const option = document.createElement('option');
+                option.value = appState.timeZone;
+                option.textContent = appState.timeZone;
+                timezoneSelect.appendChild(option);
+                console.warn("Intl.supportedValuesOf is not available.");
+            }
+        }
+        timezoneSelect.value = appState.timeZone;
+
         updateThemeSwitcherUI();
         settingsModal.classList.add('is-open');
     }
@@ -1818,12 +2080,22 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const pat = gistPatInput.value.trim();
         const id = gistIdInput.value.trim();
+        const newTimeZone = timezoneSelect.value;
+
         settingsError.classList.add('hidden');
         settingsSuccess.classList.add('hidden');
 
+        let shouldReRender = false;
+        if (newTimeZone !== appState.timeZone) {
+            appState.timeZone = newTimeZone;
+            localStorage.setItem('timeZone', newTimeZone);
+            shouldReRender = true;
+        }
+
         if (!pat || !id) {
-            settingsError.textContent = "Both fields are required.";
+            settingsError.textContent = "Both GitHub PAT and Gist ID are required for sync.";
             settingsError.classList.remove('hidden');
+            if(shouldReRender) render();
             return;
         }
 
@@ -1845,6 +2117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             settingsError.textContent = "Invalid credentials or Gist not found. Please check your PAT and Gist ID.";
             settingsError.classList.remove('hidden');
+             if(shouldReRender) render();
         }
     });
 
