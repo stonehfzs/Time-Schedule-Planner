@@ -1,14 +1,16 @@
 
 
+
 import { getGistData, saveGistData, verifyGistCredentials } from './services/gistService.js';
 import { parseEventFromString } from './services/geminiService.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const appState = {
         currentDate: new Date(),
-        viewMode: 'month', // 'day', 'week', 'month', 'year'
+        viewMode: 'week', // 'day', 'week', 'month', 'year'
         events: [],
         tasks: [],
+        tags: [],
         selectedDate: new Date(),
         editingEventId: null,
         isTaskSidebarVisible: true,
@@ -20,8 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         activeInteraction: null, // For custom drag/resize in day view
     };
 
-    const colors = ['#0284c7', '#16a34a', '#ca8a04', '#c026d3', '#db2777', '#dc2626'];
-    let selectedColor = colors[0];
+    const colors = ['#0284c7', '#16a34a', '#ca8a04', '#c026d3', '#db2777', '#dc2626', '#0d9488', '#d97706', '#6d28d9'];
     let modalGuests = [];
     let modalAttachments = [];
 
@@ -64,8 +65,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const recurrenceIntervalInput = document.getElementById('recurrence-interval');
     const recurrenceUnitInput = document.getElementById('recurrence-unit');
     const recurrenceEndDateInput = document.getElementById('recurrence-end-date');
-    const colorPicker = document.getElementById('color-picker');
-    const customColorInput = document.getElementById('custom-color-input');
     const modalError = document.getElementById('modal-error');
     const saveEventBtn = document.getElementById('save-event-btn');
     const deleteEventBtn = document.getElementById('delete-event-btn');
@@ -76,6 +75,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const eventAttachmentInput = document.getElementById('event-attachment-input');
     const addAttachmentBtn = document.getElementById('add-attachment-btn');
     const attachmentList = document.getElementById('attachment-list');
+
+    // Tag Elements
+    const eventTagSelect = document.getElementById('event-tag-select');
+    const eventTagColorSwatch = document.getElementById('event-tag-color-swatch');
+    const tagManagementList = document.getElementById('tag-management-list');
+    const newTagNameInput = document.getElementById('new-tag-name-input');
+    const addNewTagBtn = document.getElementById('add-new-tag-btn');
 
     // Quick Add Modal Elements
     const quickAddModal = document.getElementById('quick-add-modal');
@@ -604,7 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Data Sync Logic ---
     const syncData = async () => {
         if (appState.gistPat && appState.gistId) {
-            await saveGistData({ events: appState.events, tasks: appState.tasks });
+            await saveGistData({ events: appState.events, tasks: appState.tasks, tags: appState.tags });
         }
     };
 
@@ -815,6 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
             startTimeInput.value = new Date(event.start).toTimeString().substring(0, 5);
             endTimeInput.value = new Date(event.end).toTimeString().substring(0, 5);
             eventLinkedTaskInput.value = event.taskId || '';
+            eventTagSelect.value = event.tagId || (appState.tags.length > 0 ? appState.tags[0].id : '');
             
             const recurring = event.recurring;
             if (recurring) {
@@ -832,7 +839,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 eventRecurringInput.value = 'none';
             }
 
-            selectedColor = event.color;
             modalGuests = event.guests || [];
             modalAttachments = event.attachments || [];
             deleteEventBtn.classList.remove('hidden');
@@ -845,11 +851,12 @@ document.addEventListener('DOMContentLoaded', () => {
             endTimeInput.value = date.toTimeString().substring(0, 5);
             eventLinkedTaskInput.value = '';
             eventRecurringInput.value = 'none';
-            selectedColor = colors[0];
+            eventTagSelect.value = appState.tags.length > 0 ? appState.tags[0].id : '';
             deleteEventBtn.classList.add('hidden');
         }
         
-        updateColorPicker();
+        populateTagSelect();
+        renderTagManager();
         renderGuests();
         renderAttachments();
         eventModal.classList.add('is-open');
@@ -863,25 +870,37 @@ document.addEventListener('DOMContentLoaded', () => {
         guestList.innerHTML = '';
         attachmentList.innerHTML = '';
     };
-    
-    const updateColorPicker = () => {
-        // Render swatches
-        colorPicker.innerHTML = colors.map(c => `
-            <button type="button" data-color="${c}" class="h-8 w-8 rounded-full transition-transform transform hover:scale-110 ${selectedColor === c ? 'ring-2 ring-offset-2 ring-blue-500 dark:ring-offset-gray-800' : ''}" style="background-color: ${c}"></button>
-        `).join('');
-        
-        // Update custom color input's value. The browser will then show this color.
-        customColorInput.value = selectedColor;
-    
-        const isCustom = !colors.includes(selectedColor);
-        const customColorWrapper = document.getElementById('custom-color-wrapper');
-        
-        const ringClasses = ['ring-2', 'ring-offset-2', 'ring-blue-500', 'dark:ring-offset-gray-800'];
-        if (isCustom) {
-            customColorWrapper.classList.add(...ringClasses);
+
+    // --- Tag Management ---
+    const populateTagSelect = () => {
+        eventTagSelect.innerHTML = '';
+        appState.tags.forEach(tag => {
+            const option = document.createElement('option');
+            option.value = tag.id;
+            option.textContent = tag.name;
+            eventTagSelect.appendChild(option);
+        });
+        updateTagColorSwatch();
+    };
+
+    const updateTagColorSwatch = () => {
+        const selectedTagId = eventTagSelect.value;
+        const tag = appState.tags.find(t => t.id === selectedTagId);
+        if (tag) {
+            eventTagColorSwatch.style.backgroundColor = tag.color;
         } else {
-            customColorWrapper.classList.remove(...ringClasses);
+             eventTagColorSwatch.style.backgroundColor = 'transparent';
         }
+    };
+
+    const renderTagManager = () => {
+        tagManagementList.innerHTML = appState.tags.map(tag => `
+            <div class="flex items-center space-x-2" data-tag-id="${tag.id}">
+                <span class="h-5 w-5 rounded-full flex-shrink-0 border" style="background-color: ${tag.color};"></span>
+                <input type="text" value="${tag.name}" class="tag-name-input block w-full px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Tag name">
+                <button type="button" class="delete-tag-btn text-gray-400 hover:text-red-500 font-bold text-lg flex-shrink-0" aria-label="Delete tag">&times;</button>
+            </div>
+        `).join('');
     };
 
 
@@ -997,18 +1016,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     cancelBtn.addEventListener('click', closeEventModal);
     
-    colorPicker.addEventListener('click', e => {
-        if (e.target.dataset.color) {
-            selectedColor = e.target.dataset.color;
-            updateColorPicker();
-        }
-    });
-
-    customColorInput.addEventListener('input', e => {
-        selectedColor = e.target.value;
-        updateColorPicker();
-    });
-
     eventRecurringInput.addEventListener('change', () => {
         const recurrenceType = eventRecurringInput.value;
         if (recurrenceType === 'none') {
@@ -1057,13 +1064,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        const selectedTagId = eventTagSelect.value;
+        const tag = appState.tags.find(t => t.id === selectedTagId);
+
         const eventData = {
             id: appState.editingEventId || Date.now().toString(),
             title: eventTitleInput.value,
             description: eventDescriptionInput.value,
             start: startDateTime.toISOString(),
             end: endDateTime.toISOString(),
-            color: selectedColor,
+            color: tag ? tag.color : '#808080',
+            tagId: selectedTagId || null,
             recurring: recurring,
             location: eventLocationInput.value.trim(),
             organization: eventOrganizationInput.value.trim(),
@@ -1159,6 +1170,83 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') {
             e.preventDefault();
             addAttachmentBtn.click();
+        }
+    });
+
+    // Tag listeners
+    eventTagSelect.addEventListener('change', updateTagColorSwatch);
+
+    addNewTagBtn.addEventListener('click', async () => {
+        const newName = newTagNameInput.value.trim();
+        if (!newName) {
+            alert('Tag name cannot be empty.');
+            return;
+        }
+        if (appState.tags.some(t => t.name.toLowerCase() === newName.toLowerCase())) {
+            alert('A tag with this name already exists.');
+            return;
+        }
+
+        const newTag = {
+            id: `tag-${Date.now()}`,
+            name: newName,
+            color: colors[appState.tags.length % colors.length]
+        };
+        appState.tags.push(newTag);
+        newTagNameInput.value = '';
+        
+        populateTagSelect();
+        renderTagManager();
+        eventTagSelect.value = newTag.id; // Select the new tag
+        updateTagColorSwatch();
+        await syncData();
+    });
+
+    tagManagementList.addEventListener('change', async e => {
+        if (e.target.classList.contains('tag-name-input')) {
+            const tagId = e.target.closest('[data-tag-id]').dataset.tagId;
+            const newName = e.target.value.trim();
+            if (!newName) {
+                alert('Tag name cannot be empty.');
+                e.target.value = appState.tags.find(t => t.id === tagId).name; // Revert
+                return;
+            }
+            const tag = appState.tags.find(t => t.id === tagId);
+            if (tag) {
+                tag.name = newName;
+                populateTagSelect(); // Update names in dropdown
+                await syncData();
+            }
+        }
+    });
+
+    tagManagementList.addEventListener('click', async e => {
+        if (e.target.classList.contains('delete-tag-btn')) {
+            if (appState.tags.length <= 1) {
+                alert("You must have at least one tag.");
+                return;
+            }
+
+            const tagIdToDelete = e.target.closest('[data-tag-id]').dataset.tagId;
+            const tagToDelete = appState.tags.find(t => t.id === tagIdToDelete);
+
+            if (confirm(`Are you sure you want to delete the tag "${tagToDelete.name}"? This will not delete events, but they will be reassigned to the first available tag.`)) {
+                appState.tags = appState.tags.filter(t => t.id !== tagIdToDelete);
+                
+                const defaultTagId = appState.tags[0].id;
+
+                appState.events.forEach(event => {
+                    if (event.tagId === tagIdToDelete) {
+                        event.tagId = defaultTagId;
+                        event.color = appState.tags[0].color;
+                    }
+                });
+
+                populateTagSelect();
+                renderTagManager();
+                await syncData();
+                render(); // Full re-render needed as event colors might have changed
+            }
         }
     });
 
@@ -1513,17 +1601,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!recurring.endDate) delete recurring.endDate;
             }
 
+            let finalTagId = null;
+            if (event.tagId && appState.tags.find(t => t.id === event.tagId)) {
+                finalTagId = event.tagId;
+            } else if (event.tagName) {
+                let tag = appState.tags.find(t => t.name.toLowerCase() === event.tagName.toLowerCase());
+                if (tag) {
+                    finalTagId = tag.id;
+                } else {
+                    const newTag = { id: event.tagId || `tag-${Date.now()}`, name: event.tagName, color: colors[appState.tags.length % colors.length] };
+                    appState.tags.push(newTag);
+                    finalTagId = newTag.id;
+                }
+            }
+
+            const tag = appState.tags.find(t => t.id === finalTagId);
+
             const formattedEvent = {
                 ...event,
                 guests: event.guests ? event.guests.split(',').map(g => g.trim()).filter(Boolean) : [],
                 attachments: event.attachments ? event.attachments.split(',').map(a => a.trim()).filter(Boolean) : [],
                 recurring: recurring,
+                tagId: finalTagId,
+                color: tag ? tag.color : '#808080',
             };
             
             delete formattedEvent.recurring_type;
             delete formattedEvent.recurring_interval;
             delete formattedEvent.recurring_unit;
             delete formattedEvent.recurring_endDate;
+            delete formattedEvent.tagName;
+
             
             const existingEventIndex = appState.events.findIndex(e => e.id === event.id);
             if (existingEventIndex > -1) {
@@ -1540,13 +1648,22 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const eventsToExport = appState.events.map(event => {
+            const tag = appState.tags.find(t => t.id === event.tagId);
+            return {
+                ...event,
+                tagName: tag ? tag.name : '',
+            };
+        });
+
         const headers = [
             { key: 'id', label: 'id' },
             { key: 'title', label: 'title' },
             { key: 'description', label: 'description' },
             { key: 'start', label: 'start' },
             { key: 'end', label: 'end' },
-            { key: 'color', label: 'color' },
+            { key: 'tagId', label: 'tagId' },
+            { key: 'tagName', label: 'tagName' },
             { key: 'location', label: 'location' },
             { key: 'organization', label: 'organization' },
             { key: 'guests', label: 'guests', formatter: (guests) => (guests || []).join(', ') },
@@ -1558,7 +1675,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { key: 'taskId', label: 'taskId' },
         ];
 
-        const csvContent = convertToCsv(appState.events, headers);
+        const csvContent = convertToCsv(eventsToExport, headers);
         downloadFile(csvContent, 'events.csv', 'text/csv;charset=utf-8;');
     });
 
@@ -1640,13 +1757,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 endDateTime.setDate(endDateTime.getDate() + 1);
             }
 
+            const defaultTag = appState.tags.length > 0 ? appState.tags[0] : { id: null, color: '#808080' };
+
             const newEvent = {
                 id: Date.now().toString(),
                 title: parsedData.title,
                 description: '',
                 start: startDateTime.toISOString(),
                 end: endDateTime.toISOString(),
-                color: colors[Math.floor(Math.random() * colors.length)],
+                color: defaultTag.color,
+                tagId: defaultTag.id,
                 recurring: null,
                 location: '',
                 organization: '',
@@ -1752,6 +1872,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Initial Load ---
+    const getDefaultTags = () => {
+        return [
+            { id: 'tag-1', name: 'Work', color: colors[0] },
+            { id: 'tag-2', name: 'Personal', color: colors[1] },
+            { id: 'tag-3', name: 'Important', color: colors[5] },
+        ];
+    };
+
     const initializeApp = async () => {
         appState.isDataLoaded = false;
         render();
@@ -1759,21 +1887,36 @@ document.addEventListener('DOMContentLoaded', () => {
         if (appState.gistPat && appState.gistId) {
             const data = await getGistData();
             if (data) {
-                // Data migration for recurrence
+                appState.tasks = data.tasks || [];
+                appState.tags = data.tags || getDefaultTags();
+                
+                // Data migration for recurrence and tags
                 appState.events = (data.events || []).map(event => {
                     const migratedEvent = { ...event };
+                    
+                    // Migrate recurrence
                     if (typeof migratedEvent.recurring === 'string') {
-                        if (migratedEvent.recurring === 'none') {
-                            migratedEvent.recurring = null;
-                        } else {
-                            migratedEvent.recurring = { type: migratedEvent.recurring };
-                        }
+                        migratedEvent.recurring = (migratedEvent.recurring === 'none') ? null : { type: migratedEvent.recurring };
                     } else if (migratedEvent.recurring && migratedEvent.recurring.type === 'none') {
                         migratedEvent.recurring = null;
                     }
+
+                    // Migrate color to tags for old events
+                    if (!migratedEvent.tagId) {
+                        let tag = appState.tags.find(t => t.color === migratedEvent.color);
+                        if (!tag) {
+                             tag = appState.tags[0] || { id: null };
+                        }
+                        migratedEvent.tagId = tag.id;
+                    }
+
+                    // Ensure color is consistent with tag
+                    const eventTag = appState.tags.find(t => t.id === migratedEvent.tagId);
+                    migratedEvent.color = eventTag ? eventTag.color : '#808080';
+
                     return migratedEvent;
                 });
-                appState.tasks = data.tasks || [];
+
             } else {
                 // Handle case where credentials are saved but invalid
                 console.error("Failed to fetch data from Gist. Please check your credentials in Settings.");
@@ -1785,6 +1928,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else {
             // No credentials, prompt user
+            appState.tags = getDefaultTags();
             openSettingsModal();
         }
         

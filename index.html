@@ -203,7 +203,7 @@
                                 <summary class="cursor-pointer hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">Show example format</summary>
                                 <div class="mt-2 space-y-2">
                                     <p class="font-semibold">events.csv</p>
-                                    <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap">id,title,description,start,end,color,location...
+                                    <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap">id,title,description,start,end,tagId,tagName...
 "16...","Team Meeting","Discuss quarterly goals...",...</pre>
                                     <p class="font-semibold">tasks.csv</p>
                                     <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap">id,title,completed,dueDate,createdAt
@@ -345,14 +345,29 @@
                             <div id="attachment-list" class="mt-2 flex flex-wrap gap-2"></div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium">Color</label>
-                            <div class="mt-2 flex items-center space-x-2">
-                                <div id="color-picker" class="flex space-x-2">
-                                    <!-- Swatches rendered by JS -->
+                            <label for="event-tag-select" class="block text-sm font-medium">Tag</label>
+                            <div class="relative mt-1">
+                                <select id="event-tag-select" class="block w-full pl-9 pr-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 appearance-none">
+                                    <!-- Options will be populated by JS -->
+                                </select>
+                                <span id="event-tag-color-swatch" class="absolute left-2 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full pointer-events-none border border-gray-400 dark:border-gray-500"></span>
+                                <div class="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                                    <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" fill-rule="evenodd"></path></svg>
                                 </div>
-                                <div id="custom-color-wrapper" class="h-8 w-8 rounded-full overflow-hidden border-2 border-transparent">
-                                    <input type="color" id="custom-color-input" class="w-12 h-12 -translate-x-2 -translate-y-2 border-none cursor-pointer bg-transparent" aria-label="Custom color">
-                                </div>
+                            </div>
+                             <div class="mt-2">
+                                <details>
+                                    <summary class="text-sm text-gray-500 dark:text-gray-400 cursor-pointer hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded p-1">Manage Tags</summary>
+                                    <div class="mt-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md border border-gray-200 dark:border-gray-600 space-y-3">
+                                        <div id="tag-management-list" class="space-y-2 max-h-32 overflow-y-auto pr-2">
+                                            <!-- List of existing tags with edit/delete controls will be here -->
+                                        </div>
+                                        <div class="flex space-x-2 pt-3 border-t border-gray-200 dark:border-gray-600">
+                                            <input type="text" id="new-tag-name-input" placeholder="New tag name" class="block w-full px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500">
+                                            <button type="button" id="add-new-tag-btn" class="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm whitespace-nowrap">Add</button>
+                                        </div>
+                                    </div>
+                                </details>
                             </div>
                         </div>
                         <p id="modal-error" class="text-red-500 text-sm mt-2 hidden"></p>
