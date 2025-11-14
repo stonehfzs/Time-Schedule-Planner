@@ -1,4 +1,5 @@
 
+
 import { getGistData, saveGistData, verifyGistCredentials } from './services/gistService.js';
 import { parseEventFromString } from './services/geminiService.js';
 
@@ -513,6 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="text-xs opacity-80 mt-1 space-y-0.5 overflow-hidden flex-grow">
                         ${event.location ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" /></svg>${event.location}</p>` : ''}
                         ${(event.guests && event.guests.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0110 14.07a5 5 0 01-1.5-1.4c-.046.327-.07.66-.07 1a7 7 0 001.07 3.84.5.5 0 00.86 0A7 7 0 0012.93 17zM10 12a4 4 0 100-8 4 4 0 000 8z" /></svg>${event.guests.length} ${event.guests.length > 1 ? 'guests' : 'guest'}</p>` : ''}
+                        ${(event.attachments && event.attachments.length > 0) ? `<p class="flex items-center truncate"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a3 3 0 00-3 3v4a3 3 0 006 0V7a1 1 0 112 0v4a5 5 0 01-10 0V7a5 5 0 0110 0v4a1 1 0 11-2 0V7a3 3 0 00-3-3z" clip-rule="evenodd" /></svg>${event.attachments.length} ${event.attachments.length > 1 ? 'attachments' : 'attachment'}</p>` : ''}
                     </div>
                 </div>
             `;
